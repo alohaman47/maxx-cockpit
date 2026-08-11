@@ -5,7 +5,7 @@
 //| Attach to an M15 chart of each symbol you want on the dashboard. |
 //+------------------------------------------------------------------+
 #property copyright "Maxx"
-#property version   "0.20"
+#property version   "0.30"
 #property strict
 
 input string InpURL         = "https://your-app.up.railway.app/api/snapshot"; // Server URL (/api/snapshot)
@@ -230,6 +230,27 @@ void BuildEvents()
   }
 
 //+------------------------------------------------------------------+
+// Last 96 M15 bars as [[ts,h,l,c],...] (ts in UTC epoch) for the
+// dashboard session map (~24h of price path).
+string BuildBars()
+  {
+   int n = 96;
+   MqlRates r[]; ArraySetAsSeries(r, true);
+   int got = CopyRates(_Symbol, PERIOD_M15, 0, n, r);
+   if(got < 4) return("[]");
+   long off = (long)TimeGMT() - (long)TimeCurrent();
+   string out = "[";
+   for(int i = got - 1; i >= 0; i--)
+     {
+      if(i < got - 1) out += ",";
+      out += "[" + IntegerToString((long)r[i].time + off);
+      out += "," + Jd(r[i].high) + "," + Jd(r[i].low) + "," + Jd(r[i].close) + "]";
+     }
+   out += "]";
+   return(out);
+  }
+
+//+------------------------------------------------------------------+
 void OnTimer()
   {
    // rebuild touch history on each new M15 bar (and on first run)
@@ -292,6 +313,7 @@ void OnTimer()
    json += ",\"sarOk\":" + Jb(sarOk) + ",\"inZone100\":" + Jb(inZone);
    json += ",\"bounceConfirm\":" + Jb(bounceConfirm);
    json += ",\"dist100\":" + Jd(dist100) + "}";
+   json += ",\"bars\":" + BuildBars();
    json += ",\"events\":" + g_events;
    json += "}";
 
