@@ -70,6 +70,11 @@
   .pricebar{display:flex;align-items:center;gap:9px;margin:4px 0 10px;padding:10px 12px;border-radius:9px;background:linear-gradient(90deg,rgba(217,178,74,.15),transparent);border:1px solid var(--hair2);font-family:var(--mono);font-weight:700;font-size:14px;color:var(--gold2)}
   .pricebar::before{content:"";width:7px;height:7px;background:linear-gradient(135deg,#f0dfa6,#a87f2c);transform:rotate(45deg);flex-shrink:0}
 
+  .pdrow{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+  .pdcell{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:8px 11px;font-family:var(--mono);font-size:11.5px}
+  .pdcell .nm{font-weight:700;letter-spacing:.06em}
+  .pdcell .st{margin-top:2px;font-weight:700;font-size:12.5px}
+
   .sarbox{display:flex;align-items:center;gap:14px;background:var(--panel2);border-radius:10px;padding:14px;margin-top:14px}
   .sardot{width:14px;height:14px;border-radius:50%;background:var(--sar);box-shadow:0 0 10px var(--sar)}
   .sarbox .lbl{font-size:12px;color:var(--dim)}
@@ -168,6 +173,7 @@
 <div class="grid" id="grid" style="display:none">
   <div class="panel">
     <div class="ptitle">MA Stack Ladder — ราคาอยู่ตรงไหน</div>
+    <div class="pdrow" id="pdrow" style="display:none"></div>
     <div id="ladder"></div>
     <div class="sarbox">
       <div class="sardot"></div>
@@ -216,7 +222,7 @@
     <div class="panel">
       <div class="ptitle">Signal Feed</div>
       <div class="feed" id="feed"></div>
-      <div class="footer">MAXX COCKPIT v0.5 · live · กดออเดอร์จริงใน MT5</div>
+      <div class="footer">MAXX COCKPIT v0.7 · live · กดออเดอร์จริงใน MT5</div>
     </div>
   </div>
 </div>
@@ -233,7 +239,9 @@ var LINE_META = {
   WMA100: {color:'var(--wma100)', dashed:false, main:true},
   WMA144: {color:'var(--wma144)', dashed:false},
   EMA200: {color:'#9aa4b5',       dashed:true},
-  WMA800: {color:'var(--wma800)', dashed:true}
+  WMA800: {color:'var(--wma800)', dashed:true},
+  PDH:    {color:'#e08090',       dashed:true},
+  PDL:    {color:'#79d9a8',       dashed:true}
 };
 var S = { symbols:{}, active:null, feed:{}, prev:{}, sound:false, lastBeep:0, audio:null };
 
@@ -370,8 +378,23 @@ function render(){
   el('biasd').textContent = bb ? 'ห้ามมอง SELL จนกว่าแท่ง H4 จะปิดใต้เส้น' : 'ห้ามมอง BUY จนกว่าแท่ง H4 จะปิดเหนือเส้น';
   if (bb !== up) el('biasd').textContent += ' · ราคาข้ามเส้นแล้ว รอแท่ง H4 ปิดยืนยัน';
 
+  // previous-day levels
+  var pr = el('pdrow');
+  if (d.pd && d.pd.h){
+    pr.style.display = '';
+    var pdCell = function(nm, lv, color){
+      var diff = d.bid - lv, above = diff >= 0;
+      return '<div class="pdcell" style="border-color:'+color+'55">'
+        + '<span class="nm" style="color:'+color+'">'+nm+' '+fmt(lv,dg)+'</span>'
+        + '<div class="st" style="color:'+(above?'var(--buy)':'var(--sell)')+'">'
+        + (above?'เหนือเส้น +':'ใต้เส้น -')+fmt(Math.abs(diff),dg)+'</div></div>';
+    };
+    pr.innerHTML = pdCell('PDH', d.pd.h, '#e08090') + pdCell('PDL', d.pd.l, '#79d9a8');
+  } else pr.style.display = 'none';
+
   // ladder: sort lines + insert price
   var rows = Object.keys(d.lines).map(function(nm){ return {nm:nm, v:d.lines[nm]}; });
+  if (d.pd && d.pd.h){ rows.push({nm:'PDH', v:d.pd.h}); rows.push({nm:'PDL', v:d.pd.l}); }
   rows.sort(function(a,b){ return b.v - a.v; });
   var html = '', priceDone = false;
   rows.forEach(function(r){
@@ -523,6 +546,12 @@ function renderSessions(d, dg){
     out += '<line x1="'+padL+'" y1="'+Y(d.h4.wma50).toFixed(1)+'" x2="'+(W-padR)+'" y2="'+Y(d.h4.wma50).toFixed(1)+'" stroke="#2f6bff" stroke-dasharray="5,4" stroke-width="1"/>';
     out += '<text x="'+(W-padR+4)+'" y="'+(Y(d.h4.wma50)+3).toFixed(1)+'" font-size="9" fill="#2f6bff" font-family="monospace">H4 WMA50</text>';
   }
+  [['PDH', d.pd && d.pd.h, '#e08090'], ['PDL', d.pd && d.pd.l, '#79d9a8']].forEach(function(pd){
+    if (pd[1] && pd[1] > lo2 && pd[1] < hi2){
+      out += '<line x1="'+padL+'" y1="'+Y(pd[1]).toFixed(1)+'" x2="'+(W-padR)+'" y2="'+Y(pd[1]).toFixed(1)+'" stroke="'+pd[2]+'" stroke-dasharray="3,5" stroke-width="1"/>';
+      out += '<text x="'+(W-padR+4)+'" y="'+(Y(pd[1])+3).toFixed(1)+'" font-size="9" fill="'+pd[2]+'" font-family="monospace">'+pd[0]+'</text>';
+    }
+  });
   var pts = bars.map(function(b,i){ return X(i).toFixed(1)+','+Y(b[3]).toFixed(1); }).join(' ');
   out += '<polyline points="'+pts+'" fill="none" stroke="#d9b24a" stroke-width="1.6"/>';
   var lx = X(lastIdx), ly = Y(bars[lastIdx][3]);
