@@ -113,7 +113,9 @@ async function askKimi(messages, maxTokens) {
     throw new Error('Kimi API ' + r.status + ': ' + t.slice(0, 200));
   }
   const j = await r.json();
-  return ((j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '').trim();
+  const text = ((j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '').trim();
+  if (!text) throw new Error('empty response from model (token budget consumed by thinking) - try again');
+  return text;
 }
 
 // ---------- MT5 snapshot in ----------
@@ -156,7 +158,7 @@ async function maybeAutoComment(sym, prev, d) {
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: 'เหตุการณ์ที่เพิ่งเกิด: ' + ev + '\n\nข้อมูลปัจจุบัน:\n' + snapshotContext(sym)
         + '\n\nเขียนคำบรรยายเหตุการณ์นี้สำหรับ feed ยาว 1-2 ประโยคเท่านั้น' }
-    ], 150);
+    ], 800);
     if (text) broadcast({ type: 'ai', sym, at: Date.now(), text });
   } catch (e) { console.error('auto comment failed:', e.message); }
 }
@@ -171,7 +173,7 @@ app.post('/api/ai/summary', async (req, res) => {
     const text = await askKimi([
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: 'สรุปสถานการณ์ตอนนี้ 4-6 ประโยค: แต่ละ session ที่ผ่านมาเป็นยังไง ตอนนี้ราคาอยู่ตรงไหนเทียบกับเส้นและ bias ระบบอยู่สถานะไหน และต้องรออะไรต่อ\n\n' + ctx }
-    ], 450);
+    ], 2000);
     res.json({ ok: true, text });
   } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
 });
@@ -184,14 +186,15 @@ app.post('/api/ai/chat', async (req, res) => {
   let hist = Array.isArray(b.messages) ? b.messages.slice(-12) : [];
   hist = hist
     .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
-    .map(m => ({ role: m.role, content: m.content.slice(0, 2000) }));
+    .map(m => ({ role: m.role, content: m.content.slice(0, 2000) }))
+    .filter(m => m.content.trim().length > 0);
   if (!hist.length || hist[hist.length - 1].role !== 'user')
     return res.status(400).json({ ok: false, error: 'last message must be from user' });
   try {
     const text = await askKimi([
       { role: 'system', content: SYSTEM_PROMPT + '\n\nข้อมูลสดตอนนี้:\n' + ctx },
       ...hist
-    ], 600);
+    ], 2000);
     res.json({ ok: true, text });
   } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
 });
