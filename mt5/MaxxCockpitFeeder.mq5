@@ -213,11 +213,13 @@ void BuildEvents()
      }
 
    int keep = MathMin(cnt, InpMaxEvents);
+   long tzOff = (long)TimeGMT() - (long)TimeCurrent(); // server -> UTC offset
    string out = "[";
    for(int i = 0; i < keep; i++)
      {
       if(i > 0) out += ",";
       out += "{\"t\":\"" + TimeToString(evs[i].t, TIME_MINUTES) + "\"";
+      out += ",\"ts\":" + IntegerToString((long)evs[i].t + tzOff);
       out += ",\"line\":\"" + evs[i].line + "\"";
       out += ",\"type\":\"" + evs[i].type + "\"";
       out += ",\"pts\":" + Jd(evs[i].pts);
@@ -274,6 +276,7 @@ void OnTimer()
    string json = "{";
    json += "\"sym\":\"" + _Symbol + "\"";
    json += ",\"time\":\"" + TimeToString(TimeCurrent(), TIME_MINUTES) + "\"";
+   json += ",\"ts\":" + IntegerToString((long)TimeGMT());
    json += ",\"digits\":" + IntegerToString(_Digits);
    json += ",\"bid\":" + Jd(bid);
    json += ",\"zoneTol\":" + Jd(InpZoneTol);
