@@ -102,13 +102,15 @@ const SYSTEM_PROMPT = [
 
 async function askKimi(messages, maxTokens) {
   if (!KIMI_KEY) throw new Error('KIMI_API_KEY not set (Railway > Variables)');
+  const thinkingOff = (process.env.KIMI_THINKING || 'disabled').toLowerCase() === 'disabled';
   const payload = {
     model: KIMI_MODEL, messages, max_tokens: maxTokens,
-    temperature: Number(process.env.KIMI_TEMPERATURE || 1)
+    // K2.6 enforces exact values: 0.6 in instant mode, 1 in thinking mode
+    temperature: Number(process.env.KIMI_TEMPERATURE || (thinkingOff ? 0.6 : 1))
   };
   // Our job is narration of supplied numbers - no deep reasoning needed.
   // Disable thinking so K2.6 answers directly (KIMI_THINKING=enabled to turn back on).
-  if ((process.env.KIMI_THINKING || 'disabled').toLowerCase() === 'disabled')
+  if (thinkingOff)
     payload.thinking = { type: 'disabled' };
 
   async function call(body) {
