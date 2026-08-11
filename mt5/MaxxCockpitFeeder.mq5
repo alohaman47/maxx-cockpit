@@ -5,7 +5,7 @@
 //| Attach to an M15 chart of each symbol you want on the dashboard. |
 //+------------------------------------------------------------------+
 #property copyright "Maxx"
-#property version   "0.30"
+#property version   "0.40"
 #property strict
 
 input string InpURL         = "https://your-app.up.railway.app/api/snapshot"; // Server URL (/api/snapshot)
@@ -271,6 +271,10 @@ void OnTimer()
    bool sarUp   = (sarv < bid);
    int  sarBars = SarBarsSinceFlip();
 
+   // previous day levels (D1 shift 1 - broker day = NY close boundary)
+   double pdh = iHigh(_Symbol, PERIOD_D1, 1);
+   double pdl = iLow(_Symbol, PERIOD_D1, 1);
+
    // H4 bias: closed-candle rule only (shift 1)
    double h4wClosed = BufVal(hH4W50, 1);
    double h4wNow    = BufVal(hH4W50, 0);
@@ -307,6 +311,7 @@ void OnTimer()
    json += ",\"EMA200\":" + Jd(e200) + ",\"WMA800\":" + Jd(w800) + "}";
    json += ",\"sar\":{\"val\":" + Jd(sarv) + ",\"up\":" + Jb(sarUp);
    json += ",\"bars\":" + IntegerToString(sarBars) + "}";
+   json += ",\"pd\":{\"h\":" + Jd(pdh) + ",\"l\":" + Jd(pdl) + "}";
    json += ",\"h4\":{\"wma50\":" + Jd(h4wNow) + ",\"biasBuy\":" + Jb(biasBuy);
    json += ",\"dist\":" + Jd(bid - h4wNow) + "}";
    json += ",\"checks\":{\"stackOk\":" + Jb(stackOk) + ",\"emaOk\":" + Jb(emaOk);
