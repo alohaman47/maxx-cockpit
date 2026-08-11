@@ -102,19 +102,44 @@ const SYSTEM_PROMPT = [
 
 async function askKimi(messages, maxTokens) {
   if (!KIMI_KEY) throw new Error('KIMI_API_KEY not set (Railway > Variables)');
-  const r = await fetch(KIMI_URL + '/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + KIMI_KEY },
-    body: JSON.stringify({ model: KIMI_MODEL, messages, max_tokens: maxTokens,
-      temperature: Number(process.env.KIMI_TEMPERATURE || 1) })
-  });
+  const payload = {
+    model: KIMI_MODEL, messages, max_tokens: maxTokens,
+    temperature: Number(process.env.KIMI_TEMPERATURE || 1)
+  };
+  // Our job is narration of supplied numbers - no deep reasoning needed.
+  // Disable thinking so K2.6 answers directly (KIMI_THINKING=enabled to turn back on).
+  if ((process.env.KIMI_THINKING || 'disabled').toLowerCase() === 'disabled')
+    payload.thinking = { type: 'disabled' };
+
+  async function call(body) {
+    return fetch(KIMI_URL + '/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + KIMI_KEY },
+      body: JSON.stringify(body)
+    });
+  }
+
+  let r = await call(payload);
+  if (!r.ok && r.status === 400 && payload.thinking) {
+    // account/endpoint may not accept the thinking param - retry without it
+    const t = await r.text();
+    if (/thinking/i.test(t)) { delete payload.thinking; r = await call(payload); }
+    else throw new Error('Kimi API 400: ' + t.slice(0, 200));
+  }
   if (!r.ok) {
     const t = await r.text();
     throw new Error('Kimi API ' + r.status + ': ' + t.slice(0, 200));
   }
   const j = await r.json();
-  const text = ((j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '').trim();
-  if (!text) throw new Error('empty response from model (token budget consumed by thinking) - try again');
+  const msg = (j.choices && j.choices[0] && j.choices[0].message) || {};
+  let text = '';
+  if (typeof msg.content === 'string') text = msg.content;
+  else if (Array.isArray(msg.content)) text = msg.content.map(p => (p && p.text) || '').join('');
+  text = (text || '').trim();
+  if (!text) {
+    const fr = (j.choices && j.choices[0] && j.choices[0].finish_reason) || '?';
+    throw new Error('empty answer (finish_reason=' + fr + (msg.reasoning_content ? ', model spent budget thinking' : '') + ') - try again');
+  }
   return text;
 }
 
