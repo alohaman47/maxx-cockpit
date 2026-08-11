@@ -105,7 +105,8 @@ async function askKimi(messages, maxTokens) {
   const r = await fetch(KIMI_URL + '/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + KIMI_KEY },
-    body: JSON.stringify({ model: KIMI_MODEL, messages, max_tokens: maxTokens, temperature: 0.3 })
+    body: JSON.stringify({ model: KIMI_MODEL, messages, max_tokens: maxTokens,
+      temperature: Number(process.env.KIMI_TEMPERATURE || 1) })
   });
   if (!r.ok) {
     const t = await r.text();
