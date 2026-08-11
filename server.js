@@ -4,6 +4,7 @@
 
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
@@ -25,6 +26,122 @@ function pinOk(req)  { if (!AI_PIN) return true; return req.get('X-DASH-PIN') ==
 function broadcast(obj) {
   const msg = 'data: ' + JSON.stringify(obj) + '\n\n';
   for (const c of clients) { try { c.write(msg); } catch (e) { clients.delete(c); } }
+}
+
+// ---------- persistent research log (Railway Volume at DATA_DIR) ----------
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
+
+function logAppend(file, obj) {
+  try { fs.appendFileSync(path.join(DATA_DIR, file), JSON.stringify(obj) + '\n'); }
+  catch (e) { console.error('log append failed:', e.message); }
+}
+function readTail(file, maxLines) {
+  try {
+    const lines = fs.readFileSync(path.join(DATA_DIR, file), 'utf8').split('\n').filter(Boolean);
+    return lines.slice(-maxLines).map(l => { try { return JSON.parse(l); } catch (e) { return null; } }).filter(Boolean);
+  } catch (e) { return []; }
+}
+
+const recSt = {}; // per-symbol recorder state
+function recState(sym) {
+  if (!recSt[sym]) {
+    const seen = new Set();
+    for (const e of readTail('events.jsonl', 600)) if (e.sym === sym && e.key) seen.add(e.key);
+    recSt[sym] = { seen, sarFlip: null, biasFlip: null, lastStructHour: -1 };
+  }
+  return recSt[sym];
+}
+function stackStr(d) {
+  const rows = Object.keys(d.lines || {}).map(nm => ({ nm, v: d.lines[nm] }));
+  rows.push({ nm: 'PRICE', v: d.bid });
+  rows.sort((a, b) => b.v - a.v);
+  return rows.map(r => r.nm).join('>');
+}
+function record(sym, prev, d) {
+  try {
+    const st = recState(sym);
+    const now = Date.now();
+    // finalized line-touch events with market structure at record time
+    for (const ev of (d.events || [])) {
+      if (!ev.ts || ev.running || ev.type === 'testing') continue;
+      const key = ev.ts + '|' + ev.line + '|' + ev.type;
+      if (st.seen.has(key)) continue;
+      st.seen.add(key);
+      if (st.seen.size > 1200) st.seen = new Set(Array.from(st.seen).slice(-600));
+      logAppend('events.jsonl', { at: now, sym, key, ts: ev.ts, line: ev.line, type: ev.type, pts: ev.pts,
+        ctx: { biasBuy: !!(d.h4 && d.h4.biasBuy), sarUp: !!(d.sar && d.sar.up), stack: stackStr(d), bid: d.bid } });
+    }
+    // SAR regimes: from first dot to next flip -> was the first dot right?
+    if (d.sar) {
+      if (!st.sarFlip) st.sarFlip = { at: now, price: d.bid, up: d.sar.up };
+      else if (prev && prev.sar && prev.sar.up !== d.sar.up) {
+        const f = st.sarFlip;
+        const net = f.up ? (d.bid - f.price) : (f.price - d.bid);
+        logAppend('sar.jsonl', { at: now, sym, start: f.at, up: f.up, entry: f.price, exit: d.bid,
+          bars: (prev.sar.bars || 0), net: Number(net.toFixed(5)), win: net > 0 });
+        st.sarFlip = { at: now, price: d.bid, up: d.sar.up };
+      }
+    }
+    // bias regimes
+    if (d.h4) {
+      if (!st.biasFlip) st.biasFlip = { at: now, price: d.bid, buy: d.h4.biasBuy };
+      else if (prev && prev.h4 && prev.h4.biasBuy !== d.h4.biasBuy) {
+        const f = st.biasFlip;
+        const net = f.buy ? (d.bid - f.price) : (f.price - d.bid);
+        logAppend('bias.jsonl', { at: now, sym, start: f.at, buy: f.buy, entry: f.price, exit: d.bid,
+          net: Number(net.toFixed(5)), win: net > 0 });
+        st.biasFlip = { at: now, price: d.bid, buy: d.h4.biasBuy };
+      }
+    }
+    // hourly market-structure snapshot
+    const hour = Math.floor(now / 3600000);
+    if (hour !== st.lastStructHour) {
+      st.lastStructHour = hour;
+      logAppend('structure.jsonl', { at: now, sym, bid: d.bid, stack: stackStr(d),
+        biasBuy: !!(d.h4 && d.h4.biasBuy), sarUp: !!(d.sar && d.sar.up),
+        sarBars: (d.sar && d.sar.bars) || 0, dist100: (d.checks && d.checks.dist100) });
+    }
+  } catch (e) { console.error('record failed:', e.message); }
+}
+
+function statsSummary(sym, days) {
+  const cutoff = Date.now() - days * 86400000;
+  const evs = readTail('events.jsonl', 4000).filter(e => e.sym === sym && e.at >= cutoff);
+  const perLine = {};
+  for (const e of evs) {
+    const L = perLine[e.line] || (perLine[e.line] = { bounce: 0, brk: 0, ptsSum: 0 });
+    if (e.type === 'bounce') { L.bounce++; L.ptsSum += (e.pts || 0); } else L.brk++;
+  }
+  const lineText = Object.keys(perLine).map(nm => {
+    const L = perLine[nm];
+    const total = L.bounce + L.brk;
+    return nm + ': bounce ' + L.bounce + ', break ' + L.brk
+      + ', hold ' + (total ? Math.round(100 * L.bounce / total) : 0) + '%'
+      + ', avg bounce ' + (L.bounce ? (L.ptsSum / L.bounce).toFixed(2) : '0');
+  });
+  const sar = readTail('sar.jsonl', 2000).filter(e => e.sym === sym && e.at >= cutoff);
+  const bias = readTail('bias.jsonl', 500).filter(e => e.sym === sym && e.at >= cutoff);
+  const avg = (arr, k) => arr.length ? arr.reduce((a, e) => a + (e[k] || 0), 0) / arr.length : 0;
+  return {
+    sym, days, lines: perLine, lineText,
+    sar: { regimes: sar.length,
+      firstDotWinRate: sar.length ? Math.round(100 * sar.filter(e => e.win).length / sar.length) : null,
+      avgBars: Math.round(avg(sar, 'bars')), avgNet: Number(avg(sar, 'net').toFixed(2)) },
+    bias: { regimes: bias.length,
+      winRate: bias.length ? Math.round(100 * bias.filter(e => e.win).length / bias.length) : null,
+      avgNet: Number(avg(bias, 'net').toFixed(2)) },
+    structureSamples: readTail('structure.jsonl', 3000).filter(e => e.sym === sym && e.at >= cutoff).length,
+    persisted: !!process.env.DATA_DIR
+  };
+}
+function statsText(sym, days) {
+  const t = statsSummary(sym, days);
+  return [
+    'LINE STATS: ' + (t.lineText.length ? t.lineText.join(' | ') : 'no records yet'),
+    'SAR REGIMES: ' + (t.sar.regimes ? (t.sar.regimes + ' flips, first-dot win rate ' + t.sar.firstDotWinRate + '%, avg ' + t.sar.avgBars + ' bars/regime, avg net ' + t.sar.avgNet) : 'no records yet'),
+    'H4 BIAS REGIMES: ' + (t.bias.regimes ? (t.bias.regimes + ' flips, win rate ' + t.bias.winRate + '%, avg net ' + t.bias.avgNet) : 'no records yet')
+  ].join('\n');
 }
 
 // ---------- session stats in ET (for AI context) ----------
@@ -86,7 +203,8 @@ function snapshotContext(sym) {
       + ' distToWMA100=' + f(c.dist100) + ' zoneTol=' + f(d.zoneTol),
     'SYSTEM STATE: ' + state,
     'SESSIONS (ET):\n' + (sessionStats(d.bars) || 'no bar data (EA v0.3+ required)'),
-    'LINE TOUCH HISTORY (broker server time, newest first):\n' + (evs || 'none')
+    'LINE TOUCH HISTORY (broker server time, newest first):\n' + (evs || 'none'),
+    'RECORDED RESEARCH STATS (last 7 days, logged by this cockpit):\n' + statsText(sym, 7)
   ].join('\n');
 }
 
@@ -155,6 +273,7 @@ app.post('/api/snapshot', (req, res) => {
   snapshots[d.sym] = rec;
   broadcast({ sym: d.sym, at: rec.at, data: d });
   res.json({ ok: true });
+  record(d.sym, prev, d);
   maybeAutoComment(d.sym, prev, d); // fire and forget
 });
 
@@ -246,11 +365,18 @@ app.get('/api/stream', (req, res) => {
   req.on('close', () => { clearInterval(ping); clients.delete(res); });
 });
 
+app.get('/api/stats', (req, res) => {
+  const sym = req.query.sym || Object.keys(snapshots)[0] || '';
+  const days = Math.min(90, Math.max(1, Number(req.query.days) || 7));
+  res.json(statsSummary(sym, days));
+});
+
 app.get('/health', (req, res) => res.json({
   ok: true,
   symbols: Object.keys(snapshots),
   key: KEY ? 'set' : 'OPEN - set MAXX_KEY!',
-  ai: KIMI_KEY ? ('enabled (' + KIMI_MODEL + ')') : 'disabled - set KIMI_API_KEY'
+  ai: KIMI_KEY ? ('enabled (' + KIMI_MODEL + ')') : 'disabled - set KIMI_API_KEY',
+  research: process.env.DATA_DIR ? ('persisted at ' + DATA_DIR) : 'EPHEMERAL - attach Railway Volume and set DATA_DIR=/data'
 }));
 
 const PORT = process.env.PORT || 3000;
