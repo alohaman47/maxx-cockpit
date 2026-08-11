@@ -563,8 +563,10 @@ async function aiAsk(){
   var h = S.aichat[S.active] || (S.aichat[S.active] = []);
   h.push({role:'user', content:q}); renderChat();
   try {
-    var text = await aiPost('/api/ai/chat', {sym: S.active, messages: h.slice(-12)});
-    h.push({role:'assistant', content:text});
+    var clean = h.slice(-12).filter(function(m){ return m.content && m.content.trim(); });
+    var text = await aiPost('/api/ai/chat', {sym: S.active, messages: clean});
+    if (text && text.trim()) h.push({role:'assistant', content:text});
+    else h.push({role:'assistant', content:'(AI ตอบว่างมา ลองถามใหม่อีกครั้ง)'});
   } catch(e){ h.push({role:'assistant', content:'AI ใช้ไม่ได้: ' + e.message}); }
   renderChat();
 }
