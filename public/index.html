@@ -97,6 +97,14 @@
   .plan{margin-top:12px;padding:12px;border-radius:10px;background:var(--panel2);border:1px dashed var(--line);font-family:var(--mono);font-size:12.5px;color:var(--dim);text-align:center}
   .plan b{color:var(--text)}
 
+  .sesscards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+  @media(max-width:520px){.sesscards{grid-template-columns:1fr}}
+  .scard{background:var(--panel2);border-radius:10px;padding:10px 12px;border:1px solid var(--line)}
+  .scard .sn{font-size:11px;letter-spacing:.1em;font-weight:800;color:var(--dim);display:flex;justify-content:space-between}
+  .scard .sn .live{color:var(--buy)}
+  .scard .net{font-family:var(--mono);font-size:18px;font-weight:800;margin:4px 0 2px}
+  .scard .rng{font-family:var(--mono);font-size:11px;color:var(--dim)}
+
   .feed{display:flex;flex-direction:column;gap:8px;max-height:420px;overflow:auto}
   .evt{display:flex;gap:10px;padding:9px 10px;border-radius:8px;background:var(--panel2);font-size:12.5px;border-left:3px solid var(--line)}
   .evt.b{border-left-color:var(--buy)} .evt.s{border-left-color:var(--sell)} .evt.i{border-left-color:var(--wma89)}
@@ -163,12 +171,18 @@
       <div class="checklist" id="checks"></div>
       <div class="plan" id="plan"></div>
     </div>
+    <div class="panel">
+      <div class="ptitle">Session Map — 24 ชม. ล่าสุด (ET)</div>
+      <div class="sesscards" id="sesscards"></div>
+      <svg id="sesschart" viewBox="0 0 1000 240" style="width:100%;height:auto;display:block"></svg>
+      <div id="sesshint" class="plan" style="display:none"></div>
+    </div>
   </div>
 
   <div class="panel">
     <div class="ptitle">Signal Feed</div>
     <div class="feed" id="feed"></div>
-    <div class="footer">MAXX COCKPIT v0.2 · live · กดออเดอร์จริงใน MT5</div>
+    <div class="footer">MAXX COCKPIT v0.3 · live · กดออเดอร์จริงใน MT5</div>
   </div>
 </div>
 
@@ -401,10 +415,80 @@ function render(){
   var sl = bb ? d.lines.WMA144 : d.lines.WMA144;
   el('plan').innerHTML = 'แผน: <b>'+side+'</b> ที่โซน WMA100 · SL แถว <b>'+fmt(sl,dg)+'</b> (WMA144) · TP = SAR trailing · <b>กดจริงใน MT5</b>';
 
+  // session map
+  renderSessions(d, dg);
+
   // feed
   el('feed').innerHTML = (S.feed[S.active]||[]).map(function(ev){
     return '<div class="evt '+ev.cls+'"><span class="t">'+ev.t+'</span><span>'+ev.txt+'</span></div>';
   }).join('');
+}
+
+function renderSessions(d, dg){
+  var hint = el('sesshint'), svg = el('sesschart'), cards = el('sesscards');
+  if (!d.bars || d.bars.length < 4){
+    svg.style.display = 'none'; cards.innerHTML = '';
+    hint.style.display = ''; hint.textContent = 'Session Map ต้องใช้ EA v0.3 — อัพเดตไฟล์ EA บน VPS แล้ว recompile';
+    return;
+  }
+  hint.style.display = 'none'; svg.style.display = 'block';
+  var hourFmt = S._hf || (S._hf = new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'numeric',hour12:false}));
+  var bars = d.bars;
+  function sessOf(ts){
+    var h = parseInt(hourFmt.format(new Date(ts*1000)),10) % 24;
+    if (h >= 19 || h < 3) return 'ASIA';
+    if (h < 8)  return 'LONDON';
+    if (h < 17) return 'NY';
+    return 'OFF';
+  }
+  var segs = [];
+  for (var i = 0; i < bars.length; i++){
+    var sx = sessOf(bars[i][0]);
+    if (!segs.length || segs[segs.length-1].s !== sx) segs.push({s:sx, a:i, b:i});
+    else segs[segs.length-1].b = i;
+  }
+  var latest = {};
+  segs.forEach(function(g){ if (g.s !== 'OFF') latest[g.s] = g; });
+  var SCOL = {ASIA:'rgba(160,107,255,', LONDON:'rgba(47,107,255,', NY:'rgba(217,178,74,'};
+  var SNAME = {ASIA:'ASIA', LONDON:'LONDON', NY:'NEW YORK'};
+  var lastIdx = bars.length - 1;
+
+  cards.innerHTML = ['ASIA','LONDON','NY'].map(function(nm){
+    var g = latest[nm];
+    if (!g) return '<div class="scard"><div class="sn">'+SNAME[nm]+'</div><div class="rng">ยังไม่มีข้อมูลในช่วง 24 ชม.</div></div>';
+    var open = g.a > 0 ? bars[g.a-1][3] : bars[g.a][3];
+    var hi = -1e18, lo = 1e18;
+    for (var j = g.a; j <= g.b; j++){ hi = Math.max(hi, bars[j][1]); lo = Math.min(lo, bars[j][2]); }
+    var lastC = bars[g.b][3], net = lastC - open;
+    var live = (g.b === lastIdx && sessOf(bars[lastIdx][0]) === nm);
+    return '<div class="scard" style="border-color:'+SCOL[nm]+'.45)">'
+      + '<div class="sn">'+SNAME[nm]+(live?'<span class="live">● LIVE</span>':'<span>จบแล้ว</span>')+'</div>'
+      + '<div class="net" style="color:'+(net>=0?'var(--buy)':'var(--sell)')+'">'+(net>=0?'+':'')+fmt(net,dg)+'</div>'
+      + '<div class="rng">ขึ้นสูงสุด +'+fmt(Math.max(0,hi-open),dg)+' · ย่อลึกสุด -'+fmt(Math.max(0,open-lo),dg)+'</div></div>';
+  }).join('');
+
+  var W=1000, H=240, padL=8, padR=76, padT=14, padB=8;
+  var hi2=-1e18, lo2=1e18;
+  bars.forEach(function(b){ hi2=Math.max(hi2,b[1]); lo2=Math.min(lo2,b[2]); });
+  var span = (hi2-lo2) || 1; hi2 += span*0.05; lo2 -= span*0.05; span = hi2-lo2;
+  function X(i){ return padL + (W-padL-padR)*i/(bars.length-1); }
+  function Y(v){ return padT + (H-padT-padB)*(1-(v-lo2)/span); }
+  var out = '';
+  segs.forEach(function(g){
+    if (g.s === 'OFF') return;
+    out += '<rect x="'+X(g.a).toFixed(1)+'" y="0" width="'+(X(g.b)-X(g.a)).toFixed(1)+'" height="'+H+'" fill="'+SCOL[g.s]+'.09)"/>';
+    out += '<text x="'+(X(g.a)+4).toFixed(1)+'" y="12" font-size="10" fill="'+SCOL[g.s]+'.95)" font-family="monospace" font-weight="bold">'+g.s+'</text>';
+  });
+  if (d.h4 && d.h4.wma50 > lo2 && d.h4.wma50 < hi2){
+    out += '<line x1="'+padL+'" y1="'+Y(d.h4.wma50).toFixed(1)+'" x2="'+(W-padR)+'" y2="'+Y(d.h4.wma50).toFixed(1)+'" stroke="#2f6bff" stroke-dasharray="5,4" stroke-width="1"/>';
+    out += '<text x="'+(W-padR+4)+'" y="'+(Y(d.h4.wma50)+3).toFixed(1)+'" font-size="9" fill="#2f6bff" font-family="monospace">H4 WMA50</text>';
+  }
+  var pts = bars.map(function(b,i){ return X(i).toFixed(1)+','+Y(b[3]).toFixed(1); }).join(' ');
+  out += '<polyline points="'+pts+'" fill="none" stroke="#d9b24a" stroke-width="1.6"/>';
+  var lx = X(lastIdx), ly = Y(bars[lastIdx][3]);
+  out += '<circle cx="'+lx.toFixed(1)+'" cy="'+ly.toFixed(1)+'" r="3.2" fill="#d9b24a"/>';
+  out += '<text x="'+(lx+6).toFixed(1)+'" y="'+(ly+3).toFixed(1)+'" font-size="11" fill="#d9b24a" font-family="monospace" font-weight="bold">'+fmt(bars[lastIdx][3],dg)+'</text>';
+  svg.innerHTML = out;
 }
 </script>
 </body>
