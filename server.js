@@ -198,6 +198,7 @@ function snapshotContext(sym) {
     'M15 LINES: WMA50=' + f(d.lines.WMA50) + ' WMA89=' + f(d.lines.WMA89) + ' WMA100=' + f(d.lines.WMA100)
       + ' WMA144=' + f(d.lines.WMA144) + ' EMA200=' + f(d.lines.EMA200) + ' WMA800=' + f(d.lines.WMA800),
     'SAR: ' + (d.sar.up ? 'below price (uptrend)' : 'above price (downtrend)') + ' val=' + f(d.sar.val) + ' bars since flip=' + d.sar.bars,
+    (d.pd && d.pd.h ? ('PREV DAY LEVELS: PDH=' + f(d.pd.h) + ' PDL=' + f(d.pd.l) + ' - price ' + (d.bid >= d.pd.h ? 'ABOVE PDH by ' + f(d.bid - d.pd.h) : (d.bid <= d.pd.l ? 'BELOW PDL by ' + f(d.pd.l - d.bid) : 'inside range (' + f(d.bid - d.pd.l) + ' above PDL, ' + f(d.pd.h - d.bid) + ' below PDH)'))) : 'PREV DAY LEVELS: not available (EA v0.4 needed)'),
     'CHECKLIST: stackOk=' + !!c.stackOk + ' emaOk=' + !!c.emaOk + ' sarOk=' + !!c.sarOk
       + ' inZoneWMA100=' + !!c.inZone100 + ' bounceConfirm=' + !!c.bounceConfirm
       + ' distToWMA100=' + f(c.dist100) + ' zoneTol=' + f(d.zoneTol),
