@@ -191,6 +191,19 @@ var S = { symbols:{}, active:null, feed:{}, prev:{}, sound:false, lastBeep:0, au
 function fmt(v, d){ return Number(v).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}); }
 function el(id){ return document.getElementById(id); }
 
+// ---- Eastern Time helpers ----
+function etTime(dateObj){
+  return dateObj.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'America/New_York'});
+}
+// event time: prefer epoch ts from EA; fallback = server "HH:MM" minus 7h (Pepperstone tracks NY close year-round)
+function evTime(ev){
+  if (ev.ts) return etTime(new Date(ev.ts * 1000));
+  var m = /^(\d{1,2}):(\d{2})$/.exec(ev.t || '');
+  if (!m) return ev.t || '';
+  var h = (parseInt(m[1],10) - 7 + 24) % 24;
+  return ('0'+h).slice(-2) + ':' + m[2];
+}
+
 // ---- sound (needs user gesture to init) ----
 el('sndbtn').onclick = function(){
   S.sound = !S.sound;
@@ -212,9 +225,7 @@ function alertReady(){ beep(523,.15); setTimeout(function(){beep(784,.3);},180);
 // ---- feed log per symbol ----
 function pushFeed(sym, cls, txt){
   if (!S.feed[sym]) S.feed[sym] = [];
-  var t = new Date();
-  var hh = ('0'+t.getHours()).slice(-2), mm = ('0'+t.getMinutes()).slice(-2);
-  S.feed[sym].unshift({t: hh+':'+mm, cls: cls, txt: txt});
+  S.feed[sym].unshift({t: etTime(new Date()), cls: cls, txt: txt});
   if (S.feed[sym].length > 40) S.feed[sym].pop();
 }
 
@@ -292,7 +303,7 @@ function render(){
   el('grid').style.display = '';
   el('biasbar').style.display = '';
 
-  el('px').innerHTML = fmt(d.bid, dg) + '<small>bid · '+d.time+' server</small>';
+  el('px').innerHTML = fmt(d.bid, dg) + '<small>bid · '+etTime(new Date(rec.at))+' ET</small>';
 
   // bias strip
   var up = d.bid > d.h4.wma50;
@@ -340,7 +351,7 @@ function render(){
     if (ev.type==='bounce') out = '<span class="out b">เด้ง +'+fmt(ev.pts,dg)+(ev.running?' (กำลังวิ่ง)':'')+'</span>';
     else if (ev.type==='testing') out = '<span class="out t">กำลังทดสอบโซน...</span>';
     else out = '<span class="out x">ทะลุ '+(ev.type==='break_down'?'↓':'↑')+' ลึก '+fmt(ev.pts,dg)+'</span>';
-    return '<div class="hentry"><span class="ht">'+ev.t+'</span><span class="chip" style="background:'+meta.color.replace('var(--ema200)','#9aa4b5')+'">'+ev.line+'</span>'+out+'</div>';
+    return '<div class="hentry"><span class="ht">'+evTime(ev)+'</span><span class="chip" style="background:'+meta.color.replace('var(--ema200)','#9aa4b5')+'">'+ev.line+'</span>'+out+'</div>';
   }).join('');
   el('hist').innerHTML = hh || '<div class="hentry"><span class="ht">—</span> ยังไม่มีการชนเส้นในช่วงที่สแกน</div>';
 
@@ -385,7 +396,7 @@ function render(){
   }
   el('m_dist').textContent = (c.dist100>=0?'-':'+')+fmt(Math.abs(c.dist100),dg)+' pts';
   el('m_comp').textContent = compCount + ' / 3';
-  el('m_time').textContent = d.time;
+  el('m_time').textContent = etTime(new Date(rec.at)) + ' ET';
 
   var sl = bb ? d.lines.WMA144 : d.lines.WMA144;
   el('plan').innerHTML = 'แผน: <b>'+side+'</b> ที่โซน WMA100 · SL แถว <b>'+fmt(sl,dg)+'</b> (WMA144) · TP = SAR trailing · <b>กดจริงใน MT5</b>';
