@@ -65,6 +65,21 @@ mt5/MaxxCockpitFeeder.mq5  <- EA feeder ฝั่ง MT5
 ค่าเส้นบน dashboard คำนวณจากแท่ง MT5 Pepperstone โดยตรง จะตรงกับ MT5 เป๊ะ
 แต่อาจต่างจาก TradingView เล็กน้อยถ้าชาร์ต TV ใช้ feed คนละเจ้า — เวลาเทียบให้ยึด dashboard/MT5
 
+## ระบบเก็บข้อมูลวิจัย (v0.6)
+
+Server บันทึกอัตโนมัติลงไฟล์ JSONL ใน `DATA_DIR`:
+- `events.jsonl` — ทุกการชนเส้น (เด้ง/ทะลุ + จุด) พร้อมโครงสร้างตลาดขณะนั้น (stack, bias, SAR)
+- `sar.jsonl` — ทุกรอบ SAR ตั้งแต่เม็ดแรกถึง flip ถัดไป: กี่แท่ง วิ่งสุทธิกี่จุด เม็ดแรกแม่นไหม (win)
+- `bias.jsonl` — ทุกรอบ bias H4 พร้อมผล
+- `structure.jsonl` — snapshot โครงสร้างตลาดทุกชั่วโมง
+
+**สำคัญ: ต้องต่อ Railway Volume ไม่งั้นข้อมูลหายตอน redeploy**
+1. Railway > คลิกขวาที่ service > Attach Volume > mount path = `/data`
+2. Variables เพิ่ม `DATA_DIR=/data`
+3. เช็ค `/health` ต้องขึ้น `"research":"persisted at /data"`
+
+ดูสถิติ: `/api/stats?sym=XAUUSD&days=7` — และ AI เห็นสถิติ 7 วันอัตโนมัติทุกครั้งที่ถาม
+
 ## Roadmap (เฟสถัดไป)
 
 - ส่ง log การกดเข้า Pro Trade Journal อัตโนมัติ
