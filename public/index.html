@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MAXX COCKPIT — WMA Bundle + SAR (LIVE)</title>
+<style>
+  :root{
+    --bg:#0b0e13; --panel:#12161e; --panel2:#171c26; --line:#232a37;
+    --text:#e8ecf3; --dim:#8a93a6;
+    --wma50:#2f6bff; --wma89:#f5c542; --wma100:#f5c542; --wma144:#26c6da;
+    --ema200:#e8ecf3; --wma800:#a06bff; --sar:#ff9333;
+    --buy:#1ec97e; --sell:#ff4d67; --wait:#f5c542; --gold:#d9b24a;
+    --mono:ui-monospace,'SF Mono','Cascadia Mono',Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,'Segoe UI',sans-serif;min-height:100vh;padding:14px}
+  .topbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 16px;background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:14px}
+  .brand{font-weight:800;letter-spacing:.12em;font-size:14px}
+  .brand span{color:var(--gold)}
+  .symtabs{display:flex;gap:6px;flex-wrap:wrap}
+  .symtab{padding:6px 14px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--dim);font-size:13px;font-weight:600;cursor:pointer}
+  .symtab.active{background:var(--panel2);color:var(--gold);border-color:var(--gold)}
+  .tf{font-family:var(--mono);font-size:12px;color:var(--dim);border:1px solid var(--line);padding:5px 10px;border-radius:8px}
+  .spacer{flex:1}
+  .sndbtn{padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--dim);font-size:12px;cursor:pointer}
+  .sndbtn.on{color:var(--buy);border-color:var(--buy)}
+  .conn{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);font-family:var(--mono)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--buy);box-shadow:0 0 8px var(--buy);animation:pulse 1.6s infinite}
+  .dot.bad{background:var(--sell);box-shadow:0 0 8px var(--sell);animation:none}
+  @keyframes pulse{50%{opacity:.45}}
+  .price{font-family:var(--mono);font-size:26px;font-weight:700;color:var(--gold)}
+  .price small{font-size:12px;color:var(--dim);font-weight:400;display:block;text-align:right}
+
+  .bias{display:flex;align-items:stretch;margin-bottom:14px;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .bias .tag{display:flex;flex-direction:column;justify-content:center;padding:12px 18px;background:var(--panel2);border-right:1px solid var(--line);flex-shrink:0}
+  .bias .tag .l1{font-size:11px;letter-spacing:.14em;color:var(--dim);font-weight:700}
+  .bias .tag .l2{font-size:13px;font-weight:800;color:var(--wma50);font-family:var(--mono)}
+  .biasmap{flex:1;position:relative;display:flex;flex-direction:column;min-width:200px}
+  .zone{flex:1;display:flex;align-items:center;padding:6px 18px;font-size:12px;font-weight:700;letter-spacing:.06em}
+  .zone.heaven{background:linear-gradient(180deg,rgba(30,201,126,.14),rgba(30,201,126,.03));color:var(--buy)}
+  .zone.hell{background:linear-gradient(0deg,rgba(255,77,103,.14),rgba(255,77,103,.03));color:var(--sell)}
+  .divline{height:0;border-top:2px solid var(--wma50);position:relative;box-shadow:0 0 12px rgba(47,107,255,.7)}
+  .divline .lbl{position:absolute;right:14px;top:-9px;font-family:var(--mono);font-size:11px;background:var(--bg);border:1px solid var(--wma50);color:var(--wma50);padding:1px 8px;border-radius:6px}
+  .zone .me{margin-left:auto;font-family:var(--mono);font-size:12px;font-weight:800;display:flex;align-items:center;gap:8px;color:var(--gold)}
+  .biasverdict{display:flex;flex-direction:column;justify-content:center;gap:2px;padding:12px 20px;border-left:1px solid var(--line);flex-shrink:0;text-align:right}
+  .biasverdict .v{font-size:18px;font-weight:900;letter-spacing:.04em}
+  .biasverdict .d{font-size:11.5px;color:var(--dim)}
+
+  .grid{display:grid;grid-template-columns:300px 1fr 320px;gap:14px}
+  @media(max-width:1100px){.grid{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .ptitle{font-size:11px;letter-spacing:.14em;color:var(--dim);font-weight:700;margin-bottom:14px;text-transform:uppercase}
+
+  .rung{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;font-family:var(--mono);font-size:13px;margin-bottom:6px;background:var(--panel2);border-left:3px solid transparent}
+  .rung .nm{width:74px;font-weight:700;flex-shrink:0}
+  .rung .val{flex:1;text-align:right;color:var(--text)}
+  .rung.dashed .nm::after{content:" -";opacity:.6}
+  .rung.main{background:linear-gradient(90deg,rgba(245,197,66,.14),var(--panel2));border:1px solid rgba(245,197,66,.5);border-left:3px solid var(--wma100);box-shadow:0 0 10px rgba(245,197,66,.12)}
+  .rung .badge{font-size:10px;font-weight:800;color:#0b0e13;background:var(--wma100);padding:2px 7px;border-radius:6px;letter-spacing:.04em;flex-shrink:0}
+  .form{display:flex;gap:3px;margin-left:2px;flex-shrink:0}
+  .f{width:7px;height:7px;border-radius:50%;background:var(--line)}
+  .f.b{background:var(--buy)} .f.x{background:var(--sell)}
+  .pricebar{display:flex;align-items:center;gap:10px;margin:4px 0 10px;padding:10px;border-radius:8px;background:linear-gradient(90deg,rgba(217,178,74,.16),transparent);border:1px dashed var(--gold);font-family:var(--mono);font-weight:800;font-size:14px;color:var(--gold)}
+
+  .sarbox{display:flex;align-items:center;gap:14px;background:var(--panel2);border-radius:10px;padding:14px;margin-top:14px}
+  .sardot{width:14px;height:14px;border-radius:50%;background:var(--sar);box-shadow:0 0 10px var(--sar)}
+  .sarbox .lbl{font-size:12px;color:var(--dim)}
+  .sarbox .st{font-weight:800;font-size:15px;color:var(--sar)}
+  .sarbox .num{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--dim);text-align:right}
+
+  .hist{display:flex;flex-direction:column;gap:6px}
+  .hentry{display:flex;align-items:center;gap:8px;font-size:12px;font-family:var(--mono);padding:7px 9px;background:var(--panel2);border-radius:8px}
+  .hentry .ht{color:var(--dim);flex-shrink:0}
+  .chip{font-weight:800;padding:1px 7px;border-radius:6px;font-size:10.5px;color:#0b0e13;flex-shrink:0}
+  .out{margin-left:auto;font-weight:700;text-align:right}
+  .out.b{color:var(--buy)} .out.x{color:var(--sell)} .out.t{color:var(--wait)}
+  .histsum{margin-top:8px;padding:8px 10px;border-radius:8px;font-size:11.5px;background:linear-gradient(90deg,rgba(245,197,66,.12),transparent);border:1px dashed rgba(245,197,66,.45);color:var(--wma100);font-family:var(--mono)}
+
+  .sigwrap{display:flex;flex-direction:column;gap:14px}
+  .sigcard{border-radius:14px;padding:26px 20px;text-align:center;background:var(--panel2);border:1px solid var(--line)}
+  .sigcard.buy{background:radial-gradient(ellipse at top,rgba(30,201,126,.14),transparent 70%),var(--panel2);border-color:rgba(30,201,126,.5)}
+  .sigcard.sell{background:radial-gradient(ellipse at top,rgba(255,77,103,.14),transparent 70%),var(--panel2);border-color:rgba(255,77,103,.5)}
+  .sigcard.ready{box-shadow:0 0 26px rgba(30,201,126,.25)}
+  .sigstate{font-size:40px;font-weight:900;letter-spacing:.06em}
+  .sigsub{color:var(--dim);font-size:13px;margin-top:6px}
+  .sigmeta{display:flex;justify-content:center;gap:26px;margin-top:16px;font-family:var(--mono);font-size:12px;color:var(--dim);flex-wrap:wrap}
+  .sigmeta b{display:block;color:var(--text);font-size:15px;margin-top:2px}
+
+  .checklist{display:flex;flex-direction:column;gap:8px}
+  .chk{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--panel2);font-size:13px;border:1px solid var(--line)}
+  .chk .mark{width:20px;height:20px;border-radius:6px;display:grid;place-items:center;font-size:12px;font-weight:900;flex-shrink:0}
+  .chk.pass .mark{background:rgba(30,201,126,.18);color:var(--buy)}
+  .chk.fail .mark{background:rgba(255,77,103,.18);color:var(--sell)}
+  .chk .cond{flex:1}
+  .chk .who{font-family:var(--mono);font-size:11px;color:var(--dim);text-align:right}
+  .plan{margin-top:12px;padding:12px;border-radius:10px;background:var(--panel2);border:1px dashed var(--line);font-family:var(--mono);font-size:12.5px;color:var(--dim);text-align:center}
+  .plan b{color:var(--text)}
+
+  .feed{display:flex;flex-direction:column;gap:8px;max-height:420px;overflow:auto}
+  .evt{display:flex;gap:10px;padding:9px 10px;border-radius:8px;background:var(--panel2);font-size:12.5px;border-left:3px solid var(--line)}
+  .evt.b{border-left-color:var(--buy)} .evt.s{border-left-color:var(--sell)} .evt.i{border-left-color:var(--wma89)}
+  .evt .t{font-family:var(--mono);color:var(--dim);flex-shrink:0}
+  .footer{margin-top:14px;text-align:center;font-size:11px;color:var(--dim);font-family:var(--mono)}
+
+  .overlay{position:fixed;inset:0;background:rgba(11,14,19,.82);backdrop-filter:blur(3px);display:none;place-items:center;z-index:99;text-align:center}
+  .overlay.show{display:grid}
+  .overlay .box{padding:30px 40px;border:2px solid var(--sell);border-radius:16px;background:var(--panel)}
+  .overlay h1{color:var(--sell);font-size:30px;letter-spacing:.08em;margin-bottom:8px}
+  .overlay p{color:var(--dim);font-size:14px;font-family:var(--mono)}
+  .overlay.waiting .box{border-color:var(--wait)}
+  .overlay.waiting h1{color:var(--wait)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">MAXX <span>COCKPIT</span></div>
+  <div class="symtabs" id="tabs"></div>
+  <div class="tf">M15</div>
+  <div class="spacer"></div>
+  <button class="sndbtn" id="sndbtn">🔕 เสียงเตือน: ปิด</button>
+  <div class="conn"><span class="dot" id="conndot"></span> <span id="conntxt">MT5 BRIDGE</span></div>
+  <div class="price" id="px">—<small id="pxsub">รอสัญญาณ</small></div>
+</div>
+
+<div class="bias" id="biasbar" style="display:none">
+  <div class="tag"><div class="l1">DAILY BIAS</div><div class="l2">H4 · WMA 50</div></div>
+  <div class="biasmap">
+    <div class="zone heaven">☁ สวรรค์ — เหนือเส้น: มองย่อ BUY<span class="me" id="meUp"></span></div>
+    <div class="divline"><span class="lbl" id="divlbl"></span></div>
+    <div class="zone hell">🔥 นรก — ใต้เส้น: มองเด้ง SELL<span class="me" id="meDn" style="color:var(--sell)"></span></div>
+  </div>
+  <div class="biasverdict"><div class="v" id="biasv"></div><div class="d" id="biasd"></div></div>
+</div>
+
+<div class="grid" id="grid" style="display:none">
+  <div class="panel">
+    <div class="ptitle">MA Stack Ladder — ราคาอยู่ตรงไหน</div>
+    <div id="ladder"></div>
+    <div class="sarbox">
+      <div class="sardot"></div>
+      <div><div class="lbl">Parabolic SAR</div><div class="st" id="sarst"></div></div>
+      <div class="num" id="sarnum"></div>
+    </div>
+    <div class="ptitle" style="margin-top:16px">ประวัติชนเส้น — ล่าสุด</div>
+    <div class="hist" id="hist"></div>
+    <div class="histsum" id="histsum" style="display:none"></div>
+  </div>
+
+  <div class="sigwrap">
+    <div class="sigcard" id="sigcard">
+      <div class="sigstate" id="sigstate"></div>
+      <div class="sigsub" id="sigsub"></div>
+      <div class="sigmeta">
+        <div>ระยะถึง WMA100<b id="m_dist"></b></div>
+        <div>องค์ประกอบ<b id="m_comp"></b></div>
+        <div>อัพเดตล่าสุด<b id="m_time"></b></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="ptitle">Checklist ก่อนกด — ตามเทคนิค</div>
+      <div class="checklist" id="checks"></div>
+      <div class="plan" id="plan"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="ptitle">Signal Feed</div>
+    <div class="feed" id="feed"></div>
+    <div class="footer">MAXX COCKPIT v0.2 · live · กดออเดอร์จริงใน MT5</div>
+  </div>
+</div>
+
+<div class="overlay waiting show" id="overlay">
+  <div class="box"><h1 id="ovtitle">รอสัญญาณจาก MT5</h1><p id="ovmsg">เปิด MT5 + attach MaxxCockpitFeeder บนชาร์ต M15 แล้วหน้านี้จะติดเอง</p></div>
+</div>
+
+<script>
+'use strict';
+var LINE_META = {
+  WMA50:  {color:'var(--wma50)',  dashed:false},
+  WMA89:  {color:'var(--wma89)',  dashed:true},
+  WMA100: {color:'var(--wma100)', dashed:false, main:true},
+  WMA144: {color:'var(--wma144)', dashed:false},
+  EMA200: {color:'#9aa4b5',       dashed:true},
+  WMA800: {color:'var(--wma800)', dashed:true}
+};
+var S = { symbols:{}, active:null, feed:{}, prev:{}, sound:false, lastBeep:0, audio:null };
+
+function fmt(v, d){ return Number(v).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}); }
+function el(id){ return document.getElementById(id); }
+
+// ---- sound (needs user gesture to init) ----
+el('sndbtn').onclick = function(){
+  S.sound = !S.sound;
+  if (S.sound && !S.audio) S.audio = new (window.AudioContext || window.webkitAudioContext)();
+  this.textContent = S.sound ? '🔔 เสียงเตือน: เปิด' : '🔕 เสียงเตือน: ปิด';
+  this.classList.toggle('on', S.sound);
+};
+function beep(freq, dur){
+  if (!S.sound || !S.audio) return;
+  var o = S.audio.createOscillator(), g = S.audio.createGain();
+  o.frequency.value = freq; o.connect(g); g.connect(S.audio.destination);
+  g.gain.setValueAtTime(0.25, S.audio.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, S.audio.currentTime + dur);
+  o.start(); o.stop(S.audio.currentTime + dur);
+}
+function alertZone(){ beep(660,.18); setTimeout(function(){beep(660,.18);},240); }
+function alertReady(){ beep(523,.15); setTimeout(function(){beep(784,.3);},180); }
+
+// ---- feed log per symbol ----
+function pushFeed(sym, cls, txt){
+  if (!S.feed[sym]) S.feed[sym] = [];
+  var t = new Date();
+  var hh = ('0'+t.getHours()).slice(-2), mm = ('0'+t.getMinutes()).slice(-2);
+  S.feed[sym].unshift({t: hh+':'+mm, cls: cls, txt: txt});
+  if (S.feed[sym].length > 40) S.feed[sym].pop();
+}
+
+// ---- state transition detection ----
+function detect(sym, d){
+  var p = S.prev[sym];
+  if (p) {
+    if (p.h4.biasBuy !== d.h4.biasBuy)
+      pushFeed(sym, d.h4.biasBuy?'b':'s', 'แท่ง H4 ปิด '+(d.h4.biasBuy?'เหนือ':'ใต้')+' WMA50 → BIAS = '+(d.h4.biasBuy?'สวรรค์ (BUY only)':'นรก (SELL only)'));
+    if (p.sar.up !== d.sar.up)
+      pushFeed(sym, 'i', 'SAR flip → '+(d.sar.up?'ใต้ราคา (ขาขึ้น)':'เหนือราคา (ขาลง)'));
+    if (!p.checks.inZone100 && d.checks.inZone100){
+      pushFeed(sym, 'i', 'ราคาเข้าโซน WMA 100 ★ — รอแท่งเด้งยืนยัน');
+      if (sym === S.active && Date.now() - S.lastBeep > 60000){ alertZone(); S.lastBeep = Date.now(); }
+    }
+    if (!p.checks.bounceConfirm && d.checks.bounceConfirm && d.checks.inZone100){
+      pushFeed(sym, d.h4.biasBuy?'b':'s', 'แท่งเด้งยืนยันที่ WMA 100 ★ — SETUP READY');
+      if (sym === S.active) alertReady();
+    }
+  } else {
+    pushFeed(sym, 'i', 'เชื่อมต่อ '+sym+' สำเร็จ — เริ่มรับสัญญาณ');
+  }
+  S.prev[sym] = d;
+}
+
+// ---- SSE ----
+var es = new EventSource('/api/stream');
+es.onmessage = function(e){
+  var m = JSON.parse(e.data);
+  S.symbols[m.sym] = { data: m.data, at: Date.now() };
+  detect(m.sym, m.data);
+  if (!S.active) S.active = m.sym;
+  renderTabs();
+  if (m.sym === S.active) render();
+};
+es.onerror = function(){ el('conndot').classList.add('bad'); el('conntxt').textContent = 'SERVER หลุด — reconnecting'; };
+es.onopen  = function(){ el('conndot').classList.remove('bad'); };
+
+function renderTabs(){
+  var syms = Object.keys(S.symbols);
+  el('tabs').innerHTML = syms.map(function(s){
+    return '<button class="symtab'+(s===S.active?' active':'')+'" onclick="setSym(\''+s+'\')">'+s+'</button>';
+  }).join('');
+}
+function setSym(s){ S.active = s; renderTabs(); render(); }
+
+// ---- stale watchdog ----
+setInterval(function(){
+  var rec = S.active && S.symbols[S.active];
+  var ov = el('overlay');
+  if (!rec){
+    ov.className = 'overlay waiting show';
+    el('ovtitle').textContent = 'รอสัญญาณจาก MT5';
+    el('ovmsg').textContent = 'เปิด MT5 + attach MaxxCockpitFeeder บนชาร์ต M15 แล้วหน้านี้จะติดเอง';
+    return;
+  }
+  var age = Date.now() - rec.at;
+  if (age > 15000){
+    ov.className = 'overlay show';
+    el('ovtitle').textContent = 'STALE DATA — ห้ามใช้ตัดสินใจ';
+    el('ovmsg').textContent = 'ไม่ได้รับสัญญาณจาก MT5 มา '+Math.round(age/1000)+' วินาที — เช็ค MT5 / VPS / อินเทอร์เน็ต';
+    el('conndot').classList.add('bad');
+    el('conntxt').textContent = 'MT5 BRIDGE ขาด';
+  } else {
+    ov.className = 'overlay';
+    el('conndot').classList.remove('bad');
+    el('conntxt').textContent = 'MT5 BRIDGE · สดใหม่ '+(age<3000?'ตอนนี้':Math.round(age/1000)+'s');
+  }
+}, 1000);
+
+// ---- main render ----
+function render(){
+  var rec = S.symbols[S.active]; if (!rec) return;
+  var d = rec.data, dg = d.digits || 2;
+  el('grid').style.display = '';
+  el('biasbar').style.display = '';
+
+  el('px').innerHTML = fmt(d.bid, dg) + '<small>bid · '+d.time+' server</small>';
+
+  // bias strip
+  var up = d.bid > d.h4.wma50;
+  el('divlbl').textContent = 'H4 WMA50 = ' + fmt(d.h4.wma50, dg);
+  el('meUp').textContent = up ? '▶ PRICE '+fmt(d.bid,dg)+' อยู่ฝั่งนี้ (+'+fmt(d.h4.dist,dg)+')' : '';
+  el('meDn').textContent = up ? '' : '▶ PRICE '+fmt(d.bid,dg)+' อยู่ฝั่งนี้ ('+fmt(d.h4.dist,dg)+')';
+  var bb = d.h4.biasBuy;
+  el('biasv').textContent = bb ? 'BUY ONLY' : 'SELL ONLY';
+  el('biasv').style.color = bb ? 'var(--buy)' : 'var(--sell)';
+  el('biasd').textContent = bb ? 'ห้ามมอง SELL จนกว่าแท่ง H4 จะปิดใต้เส้น' : 'ห้ามมอง BUY จนกว่าแท่ง H4 จะปิดเหนือเส้น';
+  if (bb !== up) el('biasd').textContent += ' · ราคาข้ามเส้นแล้ว รอแท่ง H4 ปิดยืนยัน';
+
+  // ladder: sort lines + insert price
+  var rows = Object.keys(d.lines).map(function(nm){ return {nm:nm, v:d.lines[nm]}; });
+  rows.sort(function(a,b){ return b.v - a.v; });
+  var html = '', priceDone = false;
+  rows.forEach(function(r){
+    if (!priceDone && d.bid > r.v){
+      html += '<div class="pricebar">▶ PRICE '+fmt(d.bid,dg)+'</div>'; priceDone = true;
+    }
+    var meta = LINE_META[r.nm] || {color:'var(--dim)'};
+    var evs = (d.events||[]).filter(function(ev){ return ev.line===r.nm && ev.type!=='testing'; }).slice(0,3);
+    var dots = '';
+    for (var i=0;i<3;i++){
+      var c = evs[i] ? (evs[i].type==='bounce' ? 'b' : 'x') : '';
+      dots += '<i class="f '+c+'"></i>';
+    }
+    html += '<div class="rung'+(meta.dashed?' dashed':'')+(meta.main?' main':'')+'" style="border-left-color:'+meta.color+'">'
+         + '<span class="nm" style="color:'+meta.color+'">'+r.nm.replace('WMA','WMA ').replace('EMA','EMA ')+'</span>'
+         + (meta.main?'<span class="badge">★ เส้นหลัก</span>':'')
+         + '<span class="form">'+dots+'</span>'
+         + '<span class="val">'+fmt(r.v,dg)+'</span></div>';
+  });
+  if (!priceDone) html += '<div class="pricebar">▶ PRICE '+fmt(d.bid,dg)+'</div>';
+  el('ladder').innerHTML = html;
+
+  // SAR
+  el('sarst').textContent = d.sar.up ? 'ใต้ราคา — ขาขึ้น' : 'เหนือราคา — ขาลง';
+  el('sarnum').innerHTML = 'SAR '+fmt(d.sar.val,dg)+'<br>flip มาแล้ว '+d.sar.bars+' แท่ง';
+
+  // history
+  var hh = (d.events||[]).slice(0,8).map(function(ev){
+    var meta = LINE_META[ev.line]||{color:'#9aa4b5'};
+    var out;
+    if (ev.type==='bounce') out = '<span class="out b">เด้ง +'+fmt(ev.pts,dg)+(ev.running?' (กำลังวิ่ง)':'')+'</span>';
+    else if (ev.type==='testing') out = '<span class="out t">กำลังทดสอบโซน...</span>';
+    else out = '<span class="out x">ทะลุ '+(ev.type==='break_down'?'↓':'↑')+' ลึก '+fmt(ev.pts,dg)+'</span>';
+    return '<div class="hentry"><span class="ht">'+ev.t+'</span><span class="chip" style="background:'+meta.color.replace('var(--ema200)','#9aa4b5')+'">'+ev.line+'</span>'+out+'</div>';
+  }).join('');
+  el('hist').innerHTML = hh || '<div class="hentry"><span class="ht">—</span> ยังไม่มีการชนเส้นในช่วงที่สแกน</div>';
+
+  var w100 = (d.events||[]).filter(function(ev){ return ev.line==='WMA100' && ev.type!=='testing'; });
+  if (w100.length){
+    var bounces = w100.filter(function(ev){ return ev.type==='bounce'; });
+    var avg = bounces.length ? bounces.reduce(function(a,ev){return a+ev.pts;},0)/bounces.length : 0;
+    el('histsum').style.display = '';
+    el('histsum').textContent = '★ WMA100: รับอยู่ '+bounces.length+'/'+w100.length+' · เด้งเฉลี่ย +'+fmt(avg,dg)+(bounces.length===w100.length&&w100.length>=2?' → โซนยังแข็ง':'');
+  } else el('histsum').style.display = 'none';
+
+  // checklist
+  var c = d.checks, side = bb ? 'BUY' : 'SELL';
+  function row(pass, cond, who){
+    return '<div class="chk '+(pass?'pass':'fail')+'"><div class="mark">'+(pass?'✓':'✗')+'</div><div class="cond">'+cond+'</div><div class="who">'+who+'</div></div>';
+  }
+  el('checks').innerHTML =
+      row(true, 'Bias H4: ฝั่ง'+(bb?'สวรรค์ → กดได้เฉพาะ BUY':'นรก → กดได้เฉพาะ SELL'), (bb?'+':'')+fmt(d.h4.dist,dg))
+    + row(c.stackOk, 'องค์ประกอบ: stack เรียง'+(bb?'ขาขึ้น 50 > 89 > 100 > 144':'ขาลง 50 < 89 < 100 < 144'), c.stackOk?'เรียงครบ':'ยังไม่เรียง')
+    + row(c.emaOk && c.sarOk, 'องค์ประกอบ: '+(bb?'เหนือ':'ใต้')+' EMA200 + SAR '+(bb?'ใต้':'เหนือ')+'ราคา', (c.emaOk?'EMA ✓':'EMA ✗')+' · '+(c.sarOk?'SAR ✓':'SAR ✗'))
+    + row(c.inZone100, '★ ราคาย่อแตะโซน WMA 100 (±'+fmt(d.zoneTol,dg)+')', c.inZone100?'อยู่ในโซน':'ยังห่าง '+fmt(Math.abs(c.dist100),dg))
+    + row(c.bounceConfirm, '★ มีแท่งเด้งยืนยันที่ WMA 100 (ปิดกลับ'+(bb?'ขึ้น':'ลง')+')', c.bounceConfirm?'ยืนยันแล้ว':'รอแท่งปิด');
+
+  // signal card
+  var compsOk = c.stackOk && c.emaOk && c.sarOk;
+  var compCount = (c.stackOk?1:0)+(c.emaOk?1:0)+(c.sarOk?1:0);
+  var card = el('sigcard'), st = el('sigstate'), sub = el('sigsub');
+  card.className = 'sigcard ' + (bb?'buy':'sell');
+  if (compsOk && c.inZone100 && c.bounceConfirm){
+    card.className += ' ready';
+    st.textContent = side + ' READY'; st.style.color = bb?'var(--buy)':'var(--sell)';
+    sub.textContent = 'ครบทุกเงื่อนไข — ไปกด '+side+' ใน MT5 ตามแผน';
+  } else if (compsOk && c.inZone100){
+    st.textContent = 'เข้าโซนแล้ว'; st.style.color = 'var(--wait)';
+    sub.textContent = 'ราคาอยู่ในโซน WMA 100 — รอแท่งเด้งยืนยันก่อนกด';
+  } else if (compsOk){
+    st.textContent = side + ' ZONE'; st.style.color = bb?'var(--buy)':'var(--sell)';
+    sub.textContent = 'Bias + องค์ประกอบครบ — รอ'+(bb?'ย่อ':'เด้ง')+'แตะ WMA 100 (เส้นหลัก)';
+  } else {
+    st.textContent = 'WAIT'; st.style.color = 'var(--dim)';
+    sub.textContent = 'องค์ประกอบยังไม่ครบ ('+compCount+'/3) — ยังไม่มอง setup';
+  }
+  el('m_dist').textContent = (c.dist100>=0?'-':'+')+fmt(Math.abs(c.dist100),dg)+' pts';
+  el('m_comp').textContent = compCount + ' / 3';
+  el('m_time').textContent = d.time;
+
+  var sl = bb ? d.lines.WMA144 : d.lines.WMA144;
+  el('plan').innerHTML = 'แผน: <b>'+side+'</b> ที่โซน WMA100 · SL แถว <b>'+fmt(sl,dg)+'</b> (WMA144) · TP = SAR trailing · <b>กดจริงใน MT5</b>';
+
+  // feed
+  el('feed').innerHTML = (S.feed[S.active]||[]).map(function(ev){
+    return '<div class="evt '+ev.cls+'"><span class="t">'+ev.t+'</span><span>'+ev.txt+'</span></div>';
+  }).join('');
+}
+</script>
+</body>
+</html>
