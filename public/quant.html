@@ -76,6 +76,10 @@
     <div class="ptitle">WMA100 — แยกสภาพ stack / bias / เกรด</div>
     <div id="w100split"></div>
   </div>
+  <div class="panel" style="grid-column:1/-1">
+    <div class="ptitle">My Trades — attribution ไม้จริงจากบัญชี</div>
+    <div id="tradesbox"></div>
+  </div>
   <div class="panel">
     <div class="ptitle">SAR เม็ดแรก — แม่นแค่ไหน</div>
     <div id="sarbox"></div>
@@ -159,6 +163,21 @@ async function load(){
   sp += splitBlock('เกรด confluence ขณะชน', q.w100.byGrade, ['A','B','C','D']);
   el('w100split').innerHTML = sp || '<div class="empty">ยังไม่มีข้อมูล</div>';
 
+  // my trades
+  var t = q.trades || {};
+  if (!t.n){
+    el('tradesbox').innerHTML = '<div class="empty">ยังไม่มีไม้ที่ปิดแล้วในช่วงที่เลือก — พอเทรดจริง ระบบจะจับจาก MT5 อัตโนมัติพร้อมเกรด setup ตอนเข้า</div>';
+  } else {
+    el('tradesbox').innerHTML =
+        '<table><tr><th>ไม้ที่ปิดแล้ว</th><th>win rate</th><th>avg win</th><th>avg loss</th><th>profit factor</th><th>net P/L</th></tr>'
+      + '<tr><td>' + t.n + '</td><td class="' + holdCls(t.winRate||0) + '">' + t.winRate + '%</td>'
+      + '<td class="pos">+' + f2(t.avgWin) + '</td><td class="neg">' + f2(t.avgLoss) + '</td>'
+      + '<td>' + (t.profitFactor == null ? '-' : t.profitFactor) + '</td>'
+      + '<td class="' + (t.netPL > 0 ? 'pos' : 'neg') + '">' + (t.netPL > 0 ? '+' : '') + f2(t.netPL) + ' USD</td></tr></table>'
+      + splitBlock('win rate แยกเกรด confluence ตอนเข้า', t.byGrade, ['A','B','C','D'], 'winRate')
+      + splitBlock('win rate แยก session ตอนเข้า', t.bySession, ['ASIA','LONDON','NY'], 'winRate');
+  }
+
   // SAR
   var sa = q.sar;
   el('sarbox').innerHTML =
@@ -190,8 +209,8 @@ function bars(obj, order, field){
     return '<div class="bar"><span class="bl">' + k + '</span><span class="btrack"><span class="bfill" style="width:' + v + '%"></span></span><span class="bv ' + holdCls(v) + '">' + v + '% <span style="color:var(--dim)">(n=' + obj[k].n + ')</span></span></div>';
   }).join('');
 }
-function splitBlock(title, obj, order){
-  var b = bars(obj, order);
+function splitBlock(title, obj, order, field){
+  var b = bars(obj, order, field);
   if (!b) return '';
   return '<div class="ptitle" style="margin-top:12px">' + title + '</div>' + b;
 }
