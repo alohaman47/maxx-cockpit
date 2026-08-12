@@ -125,6 +125,11 @@
   .scard .rng{font-family:var(--mono);font-size:11px;color:var(--dim)}
 
   .colwrap{display:flex;flex-direction:column;gap:14px;min-width:0}
+  .riskrow{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12.5px;padding:7px 2px;border-bottom:1px solid rgba(36,41,56,.5)}
+  .riskrow .rl{color:var(--dim)}
+  .panel.breach{border-color:rgba(240,80,106,.65);box-shadow:0 0 22px rgba(240,80,106,.18)}
+  .cooldown{margin-top:10px;padding:10px 12px;border-radius:9px;background:rgba(240,80,106,.14);border:1px solid rgba(240,80,106,.55);color:#ff9fae;font-weight:700;font-size:12.5px;text-align:center;animation:pulse 1.8s infinite}
+  .evt.tr{border-left-color:var(--gold2)}
   .aibtn{width:100%;padding:12px;border-radius:10px;border:1px solid var(--hair2);background:linear-gradient(120deg,rgba(217,178,74,.16),rgba(217,178,74,.04));color:#ecd9a0;font-size:13px;font-weight:700;letter-spacing:.06em;cursor:pointer;font-family:var(--thai)}
   .aibtn:disabled{opacity:.5;cursor:wait}
   .aiout{margin-top:10px;padding:12px 13px;border-radius:10px;background:var(--panel2);border-left:2px solid var(--gold);font-size:13px;line-height:1.6;display:none;white-space:pre-wrap}
@@ -230,6 +235,10 @@
   </div>
 
   <div class="colwrap">
+    <div class="panel" id="riskpanel">
+      <div class="ptitle">Risk Desk — วินัยประจำวัน</div>
+      <div id="riskbox"></div>
+    </div>
     <div class="panel">
       <div class="ptitle">AI Analyst — Kimi</div>
       <button class="aibtn" id="aisum">สรุปสถานการณ์ตอนนี้</button>
@@ -243,7 +252,7 @@
     <div class="panel">
       <div class="ptitle">Signal Feed</div>
       <div class="feed" id="feed"></div>
-      <div class="footer">MAXX COCKPIT v0.8 · live · กดออเดอร์จริงใน MT5</div>
+      <div class="footer">MAXX COCKPIT v1.0 · live · กดออเดอร์จริงใน MT5</div>
     </div>
   </div>
 </div>
@@ -335,6 +344,11 @@ es.onmessage = function(e){
   var m = JSON.parse(e.data);
   if (m.type === 'ai'){
     pushFeed(m.sym, 'ai', '<b style="color:#ecd9a0">ANALYST</b> · ' + String(m.text).replace(/</g,'&lt;'));
+    if (m.sym === S.active) render();
+    return;
+  }
+  if (m.type === 'trade'){
+    pushFeed(m.sym, m.pl > 0 ? 'b' : (m.pl < 0 ? 's' : 'tr'), String(m.txt).replace(/</g,'&lt;'));
     if (m.sym === S.active) render();
     return;
   }
@@ -498,6 +512,32 @@ function render(){
 
   var sl = bb ? d.lines.WMA144 : d.lines.WMA144;
   el('plan').innerHTML = 'แผน: <b>'+side+'</b> ที่โซน WMA100 · SL แถว <b>'+fmt(sl,dg)+'</b> (WMA144) · TP = SAR trailing · <b>กดจริงใน MT5</b>';
+
+  // risk desk
+  var rp = el('riskpanel'), rb = el('riskbox');
+  if (d.acct){
+    var a = d.acct;
+    var lossLim = a.bal * a.limLossPct / 100;
+    var breach = a.trades >= a.limTrades || a.streak >= a.limStreak || a.dayPL <= -lossLim;
+    var plc = a.dayPL > 0 ? 'var(--buy)' : (a.dayPL < 0 ? 'var(--sell)' : 'var(--dim)');
+    rb.innerHTML =
+        '<div class="riskrow"><span class="rl">Equity / Balance</span><span>' + fmt(a.eq,2) + ' / ' + fmt(a.bal,2) + '</span></div>'
+      + '<div class="riskrow"><span class="rl">P/L วันนี้</span><span style="color:' + plc + '">' + (a.dayPL>0?'+':'') + fmt(a.dayPL,2) + ' USD</span></div>'
+      + '<div class="riskrow"><span class="rl">ไม้วันนี้</span><span style="color:' + (a.trades >= a.limTrades ? 'var(--sell)' : 'var(--text)') + '">' + a.trades + ' / ' + a.limTrades + '</span></div>'
+      + '<div class="riskrow"><span class="rl">แพ้ติดกัน</span><span style="color:' + (a.streak >= a.limStreak ? 'var(--sell)' : 'var(--text)') + '">' + a.streak + ' / ' + a.limStreak + '</span></div>'
+      + '<div class="riskrow"><span class="rl">ลิมิตขาดทุน/วัน</span><span>' + fmt(lossLim,2) + ' USD</span></div>'
+      + '<div class="riskrow" style="border-bottom:none"><span class="rl">Position เปิดอยู่</span><span>' + a.openPos + '</span></div>'
+      + (breach ? '<div class="cooldown">COOLDOWN — ครบลิมิตวันนี้แล้ว พักตามกฎ Risk Desk</div>' : '');
+    rp.classList.toggle('breach', breach);
+    if (!S.riskPrev) S.riskPrev = {};
+    if (S.riskPrev[S.active] !== undefined && S.riskPrev[S.active] !== breach && breach){
+      pushFeed(S.active, 's', 'RISK DESK: ครบลิมิตวันนี้ (ไม้ ' + a.trades + '/' + a.limTrades + ' · แพ้ติด ' + a.streak + '/' + a.limStreak + ' · P/L ' + fmt(a.dayPL,2) + ') — COOLDOWN');
+      alertZone();
+    }
+    S.riskPrev[S.active] = breach;
+  } else {
+    rb.innerHTML = '<div class="riskrow" style="border-bottom:none"><span class="rl">ต้องอัพ EA v0.6 บน VPS เพื่อเปิด Risk Desk</span></div>';
+  }
 
   // H1 confirm cell
   var h1c = el('h1cell');
