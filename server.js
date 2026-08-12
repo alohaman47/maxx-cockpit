@@ -428,6 +428,21 @@ app.post('/api/ai/summary', async (req, res) => {
   } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
 });
 
+app.post('/api/ai/devil', async (req, res) => {
+  if (!pinOk(req)) return res.status(401).json({ ok: false, error: 'bad pin' });
+  if (!aiRateOk()) return res.status(429).json({ ok: false, error: 'AI rate limit reached - try again later' });
+  const sym = (req.body && req.body.sym) || Object.keys(snapshots)[0];
+  const ctx = snapshotContext(sym);
+  if (!ctx) return res.status(400).json({ ok: false, error: 'no live data for ' + sym });
+  try {
+    const text = await askKimi([
+      { role: 'system', content: SYSTEM_PROMPT + '\n\nโหมดพิเศษ: ตอนนี้คุณสวมบท DEVIL\'S ADVOCATE ของ Risk Desk — หน้าที่คือพยายามฆ่าไอเดียเทรดปัจจุบัน ห้ามอวย ห้ามหาข้อดี ห้ามปลอบ' },
+      { role: 'user', content: 'โจมตี setup ปัจจุบันแบบตรงไปตรงมา: หาเหตุผล 3 ข้อที่ชัดเจนที่สุดว่าทำไมการเข้าไม้ตอนนี้ (หรือไม้ที่กำลังจะเกิด) อาจเสีย โดยทุกข้อต้องอ้างตัวเลขจริงจากข้อมูล เช่น ข่าวที่ใกล้เข้ามา ระยะห่างจากโซน สภาพ stack อายุ SAR สถิติที่บันทึกไว้ session และสถานะ Risk Desk แล้วปิดท้ายด้วยประโยคเดียว: ต้องเห็นอะไรก่อนถึงจะสมควรกด\n\n' + ctx }
+    ], 2000);
+    res.json({ ok: true, text });
+  } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
+});
+
 app.post('/api/ai/chat', async (req, res) => {
   if (!pinOk(req)) return res.status(401).json({ ok: false, error: 'bad pin' });
   if (!aiRateOk()) return res.status(429).json({ ok: false, error: 'AI rate limit reached - try again later' });
