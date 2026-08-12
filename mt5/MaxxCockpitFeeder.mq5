@@ -264,6 +264,27 @@ string BuildBars()
   }
 
 //+------------------------------------------------------------------+
+// Last 48 M5 bars (4 hours) for the trigger-timeframe chart
+string BuildM5()
+  {
+   MqlRates r[];
+   ArraySetAsSeries(r, false);
+   int n = CopyRates(_Symbol, PERIOD_M5, 0, 48, r);
+   if(n < 2) return("[]");
+   long off = (long)TimeGMT() - (long)TimeCurrent();
+   string out = "[";
+   for(int i = 0; i < n; i++)
+     {
+      if(i > 0) out += ",";
+      out += "[" + IntegerToString((long)r[i].time + off);
+      out += "," + Jd(r[i].open) + "," + Jd(r[i].high);
+      out += "," + Jd(r[i].low) + "," + Jd(r[i].close) + "]";
+     }
+   out += "]";
+   return(out);
+  }
+
+//+------------------------------------------------------------------+
 // WMA50/WMA100 values for the last 96 M15 bars (oldest -> newest),
 // aligned with BuildBars output, for the dashboard candle chart.
 string BuildMa()
@@ -509,6 +530,7 @@ void OnTimer()
    json += ",\"acct\":" + BuildAcct();
    json += ",\"deals\":" + BuildDeals();
    json += ",\"pos\":" + BuildPos();
+   json += ",\"m5bars\":" + BuildM5();
    json += ",\"m5\":" + BuildM5();
    json += ",\"events\":" + g_events;
    json += "}";
