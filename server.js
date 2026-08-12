@@ -371,6 +371,15 @@ function snapshotContext(sym) {
     (d.pos ? ('OPEN POSITIONS: ' + (d.pos.length ? d.pos.map(pp => pp.dir.toUpperCase() + ' ' + pp.lot + ' ' + pp.symp + ' @ ' + pp.entry + ' (floating P/L ' + pp.pl + ')').join(' | ') : 'none')) : 'OPEN POSITIONS: unknown (EA v0.61 needed)'),
     'SESSIONS (ET):\n' + (sessionStats(d.bars) || 'no bar data (EA v0.3+ required)'),
     'LINE TOUCH HISTORY (broker server time, newest first):\n' + (evs || 'none'),
+    (function(){
+      if (!d.m5 || !d.m5.bars || d.m5.bars.length < 3) return 'M5 TRIGGER: not available (EA v0.70 needed)';
+      const lb = d.m5.bars[d.m5.bars.length - 2];
+      const bull = lb[4] > lb[1];
+      const bb2 = d.h4 && d.h4.biasBuy;
+      const inZ = !!(d.checks && d.checks.inZone100);
+      if (!inZ) return 'M5 TRIGGER: waiting - price not in M15 WMA100 zone yet';
+      return 'M5 TRIGGER: price IN M15 zone, last closed M5 candle is ' + (bull ? 'bullish' : 'bearish') + ' -> ' + ((bb2 ? bull : !bull) ? 'TRIGGER READY (M5 closed back in bias direction)' : 'no trigger yet (M5 still against bias)');
+    })(),
     (d.h1 ? ('H1 CONFIRM: price ' + (d.bid > d.h1.wma50 ? 'above' : 'below') + ' H1 WMA50 (' + f(d.h1.wma50) + '), ' + (d.bid > d.h1.wma100 ? 'above' : 'below') + ' H1 WMA100 (' + f(d.h1.wma100) + ')') : 'H1 CONFIRM: not available (EA v0.5 needed)'),
     (d.acct ? ('RISK DESK: equity ' + d.acct.eq + ', today P/L ' + d.acct.dayPL + ', trades ' + d.acct.trades + '/' + d.acct.limTrades + ', loss streak ' + d.acct.streak + '/' + d.acct.limStreak + ', open positions ' + d.acct.openPos + ((d.acct.trades >= d.acct.limTrades || d.acct.streak >= d.acct.limStreak || d.acct.dayPL <= -(d.acct.bal * d.acct.limLossPct / 100)) ? ' - COOLDOWN ACTIVE, no more trades today per risk rules' : '')) : 'RISK DESK: not available (EA v0.6 needed)'),
     'CONFLUENCE SCORE: ' + confluenceOf(sym, d) + '/100' + (newsLockFor(sym) ? ' (NEWS LOCK active - no trading during news window)' : ''),
