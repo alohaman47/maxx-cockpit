@@ -5,7 +5,7 @@
 //| Attach to an M15 chart of each symbol you want on the dashboard. |
 //+------------------------------------------------------------------+
 #property copyright "Maxx"
-#property version   "0.63"
+#property version   "0.70"
 #property strict
 
 input string InpURL         = "https://your-app.up.railway.app/api/snapshot"; // Server URL (/api/snapshot)
@@ -20,7 +20,7 @@ input double InpMaxDayLossPct = 3.0;         // Risk: max daily loss (% of balan
 input bool   InpManualOnly    = true;        // Count only manual trades (magic 0) in risk/attribution
 
 // --- indicator handles ---
-int hW50, hW89, hW100, hW144, hE200, hW800, hSAR, hH4W50, hH1W50, hH1W100;
+int hW50, hW89, hW100, hW144, hE200, hW800, hSAR, hH4W50, hH1W50, hH1W100, hM5W50, hM5W100;
 
 datetime g_lastM15  = 0;
 ulong    g_lastDeal = 0;
@@ -49,11 +49,14 @@ int OnInit()
    hH4W50 = iMA(_Symbol, PERIOD_H4, 50, 0, MODE_LWMA, PRICE_CLOSE);
    hH1W50  = iMA(_Symbol, PERIOD_H1, 50,  0, MODE_LWMA, PRICE_CLOSE);
    hH1W100 = iMA(_Symbol, PERIOD_H1, 100, 0, MODE_LWMA, PRICE_CLOSE);
+   hM5W50  = iMA(_Symbol, PERIOD_M5, 50,  0, MODE_LWMA, PRICE_CLOSE);
+   hM5W100 = iMA(_Symbol, PERIOD_M5, 100, 0, MODE_LWMA, PRICE_CLOSE);
 
    if(hW50==INVALID_HANDLE || hW89==INVALID_HANDLE || hW100==INVALID_HANDLE ||
       hW144==INVALID_HANDLE || hE200==INVALID_HANDLE || hW800==INVALID_HANDLE ||
       hSAR==INVALID_HANDLE || hH4W50==INVALID_HANDLE ||
-      hH1W50==INVALID_HANDLE || hH1W100==INVALID_HANDLE)
+      hH1W50==INVALID_HANDLE || hH1W100==INVALID_HANDLE ||
+      hM5W50==INVALID_HANDLE || hM5W100==INVALID_HANDLE)
      {
       Print("MaxxCockpitFeeder: failed to create indicator handles");
       return(INIT_FAILED);
@@ -372,6 +375,37 @@ string BuildDeals()
   }
 
 //+------------------------------------------------------------------+
+// M5 trigger layer: last 60 M5 bars + M5 WMA50/100 arrays (oldest -> newest)
+string BuildM5()
+  {
+   int n = 60;
+   MqlRates r[];
+   ArraySetAsSeries(r, true);
+   if(CopyRates(_Symbol, PERIOD_M5, 0, n, r) < n) return("null");
+   long off = (long)TimeGMT() - (long)TimeCurrent();
+   string bars = "[";
+   for(int i = n - 1; i >= 0; i--)
+     {
+      if(i < n - 1) bars += ",";
+      bars += "[" + IntegerToString((long)r[i].time + off);
+      bars += "," + Jd(r[i].open) + "," + Jd(r[i].high);
+      bars += "," + Jd(r[i].low) + "," + Jd(r[i].close) + "]";
+     }
+   bars += "]";
+   double a50[], a100[];
+   ArraySetAsSeries(a50, true); ArraySetAsSeries(a100, true);
+   if(CopyBuffer(hM5W50, 0, 0, n, a50) < n)   return("null");
+   if(CopyBuffer(hM5W100, 0, 0, n, a100) < n) return("null");
+   string s50 = "[", s100 = "[";
+   for(int i = n - 1; i >= 0; i--)
+     {
+      if(i < n - 1) { s50 += ","; s100 += ","; }
+      s50 += Jd(a50[i]); s100 += Jd(a100[i]);
+     }
+   return("{\"bars\":" + bars + ",\"ma\":{\"w50\":" + s50 + "],\"w100\":" + s100 + "]}}");
+  }
+
+//+------------------------------------------------------------------+
 // Current open positions (account-wide, up to 10) for AI red-teaming
 string BuildPos()
   {
@@ -475,6 +509,7 @@ void OnTimer()
    json += ",\"acct\":" + BuildAcct();
    json += ",\"deals\":" + BuildDeals();
    json += ",\"pos\":" + BuildPos();
+   json += ",\"m5\":" + BuildM5();
    json += ",\"events\":" + g_events;
    json += "}";
 
