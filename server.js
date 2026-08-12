@@ -368,6 +368,7 @@ function snapshotContext(sym) {
       + ' inZoneWMA100=' + !!c.inZone100 + ' bounceConfirm=' + !!c.bounceConfirm
       + ' distToWMA100=' + f(c.dist100) + ' zoneTol=' + f(d.zoneTol),
     'SYSTEM STATE: ' + state,
+    (d.m5 ? ('M5 TRIGGER at WMA100 zone: ' + (d.m5.trigBuy ? 'BUY confirm candle on last closed M5' : d.m5.trigSell ? 'SELL confirm candle on last closed M5' : 'none yet')) : 'M5 TRIGGER: not available (EA v0.70 needed)'),
     (d.pos ? ('OPEN POSITIONS: ' + (d.pos.length ? d.pos.map(pp => pp.dir.toUpperCase() + ' ' + pp.lot + ' ' + pp.symp + ' @ ' + pp.entry + ' (floating P/L ' + pp.pl + ')').join(' | ') : 'none')) : 'OPEN POSITIONS: unknown (EA v0.61 needed)'),
     'SESSIONS (ET):\n' + (sessionStats(d.bars) || 'no bar data (EA v0.3+ required)'),
     'LINE TOUCH HISTORY (broker server time, newest first):\n' + (evs || 'none'),
