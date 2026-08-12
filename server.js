@@ -38,6 +38,66 @@ function broadcast(obj) {
   for (const c of clients) { try { c.write(msg); } catch (e) { clients.delete(c); } }
 }
 
+// ---------- economic calendar (ForexFactory weekly feed) ----------
+let newsCache = { at: 0, events: [] };
+async function fetchNews() {
+  if (Date.now() - newsCache.at < 45 * 60000 && newsCache.events.length) return;
+  try {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 10000);
+    const r = await fetch('https://nfs.faireconomy.media/ff_calendar_thisweek.json', { signal: ac.signal });
+    clearTimeout(timer);
+    if (!r.ok) return;
+    const j = await r.json();
+    newsCache = {
+      at: Date.now(),
+      events: (Array.isArray(j) ? j : []).map(e => ({
+        t: Date.parse(e.date), title: e.title, ccy: e.country, impact: e.impact
+      })).filter(e => !isNaN(e.t) && (e.impact === 'High' || e.impact === 'Medium'))
+    };
+    console.log('news calendar loaded:', newsCache.events.length, 'events');
+  } catch (e) { console.error('news fetch failed:', e.message); }
+}
+setInterval(fetchNews, 10 * 60000);
+fetchNews();
+
+function newsCcy(sym) {
+  const su = (sym || '').toUpperCase();
+  const out = new Set(['USD']);
+  ['EUR', 'GBP', 'JPY', 'AUD', 'NZD', 'CAD', 'CHF'].forEach(c => { if (su.includes(c)) out.add(c); });
+  return out;
+}
+function newsFor(sym, horizonH) {
+  const now = Date.now(), ccy = newsCcy(sym);
+  return newsCache.events
+    .filter(e => ccy.has(e.ccy) && e.t > now - 30 * 60000 && e.t < now + horizonH * 3600000)
+    .sort((a, b) => a.t - b.t);
+}
+function newsLockFor(sym) {
+  const now = Date.now();
+  return newsFor(sym, 1).find(e => e.impact === 'High' && now >= e.t - 15 * 60000 && now <= e.t + 15 * 60000) || null;
+}
+
+// ---------- confluence score (same formula as dashboard) ----------
+function confluenceOf(sym, d) {
+  const c = d.checks || {}, bb = d.h4 && d.h4.biasBuy;
+  let sc = 0;
+  if (c.stackOk) sc += 25;
+  if (c.emaOk) sc += 10;
+  if (c.sarOk) sc += 15;
+  const tol = d.zoneTol || 2, ad = Math.abs(c.dist100 || 999);
+  if (c.inZone100) sc += 20; else if (ad <= 2 * tol) sc += 10; else if (ad <= 4 * tol) sc += 5;
+  const evs = (d.events || []).filter(e => e.line === 'WMA100' && e.type !== 'testing');
+  if (evs.length) sc += Math.round(15 * evs.filter(e => e.type === 'bounce').length / evs.length);
+  else sc += 7;
+  if (d.pd && d.pd.h && d.lines && d.lines.WMA100) {
+    const near = bb ? Math.abs(d.lines.WMA100 - d.pd.l) : Math.abs(d.lines.WMA100 - d.pd.h);
+    if (near <= 3 * tol) sc += 10;
+  }
+  if (newsLockFor(sym)) sc = Math.max(0, sc - 25);
+  return Math.min(100, sc);
+}
+
 // ---------- persistent research log (Railway Volume at DATA_DIR) ----------
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
@@ -165,6 +225,7 @@ function sessOf(ts) {
 }
 function sessionStats(bars) {
   if (!bars || bars.length < 4) return '';
+  bars = bars.map(b => b.length >= 5 ? [b[0], b[2], b[3], b[4]] : b);
   const segs = [];
   bars.forEach((b, i) => {
     const s = sessOf(b[0]);
@@ -215,6 +276,9 @@ function snapshotContext(sym) {
     'SYSTEM STATE: ' + state,
     'SESSIONS (ET):\n' + (sessionStats(d.bars) || 'no bar data (EA v0.3+ required)'),
     'LINE TOUCH HISTORY (broker server time, newest first):\n' + (evs || 'none'),
+    (d.h1 ? ('H1 CONFIRM: price ' + (d.bid > d.h1.wma50 ? 'above' : 'below') + ' H1 WMA50 (' + f(d.h1.wma50) + '), ' + (d.bid > d.h1.wma100 ? 'above' : 'below') + ' H1 WMA100 (' + f(d.h1.wma100) + ')') : 'H1 CONFIRM: not available (EA v0.5 needed)'),
+    'CONFLUENCE SCORE: ' + confluenceOf(sym, d) + '/100' + (newsLockFor(sym) ? ' (NEWS LOCK active - no trading during news window)' : ''),
+    'UPCOMING NEWS (' + Array.from(newsCcy(sym)).join('/') + '): ' + (newsFor(sym, 48).slice(0, 3).map(e => e.ccy + ' ' + e.title + ' [' + e.impact + '] in ' + Math.round((e.t - Date.now()) / 60000) + 'min').join(' | ') || 'none in 48h'),
     'RECORDED RESEARCH STATS (last 7 days, logged by this cockpit):\n' + statsText(sym, 7)
   ].join('\n');
 }
@@ -376,6 +440,11 @@ app.get('/api/stream', (req, res) => {
   clients.add(res);
   const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch (e) {} }, 15000);
   req.on('close', () => { clearInterval(ping); clients.delete(res); });
+});
+
+app.get('/api/news', (req, res) => {
+  const sym = req.query.sym || Object.keys(snapshots)[0] || 'XAUUSD';
+  res.json({ at: newsCache.at, events: newsFor(sym, 72) });
 });
 
 app.get('/api/stats', (req, res) => {
