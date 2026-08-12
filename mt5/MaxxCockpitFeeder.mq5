@@ -5,7 +5,7 @@
 //| Attach to an M15 chart of each symbol you want on the dashboard. |
 //+------------------------------------------------------------------+
 #property copyright "Maxx"
-#property version   "0.60"
+#property version   "0.61"
 #property strict
 
 input string InpURL         = "https://your-app.up.railway.app/api/snapshot"; // Server URL (/api/snapshot)
@@ -369,6 +369,30 @@ string BuildDeals()
   }
 
 //+------------------------------------------------------------------+
+// Current open positions (account-wide, up to 10) for AI red-teaming
+string BuildPos()
+  {
+   int total = PositionsTotal();
+   string out = "["; int cnt = 0;
+   for(int i = 0; i < total && cnt < 10; i++)
+     {
+      ulong tk = PositionGetTicket(i);
+      if(tk == 0) continue;
+      long ptype = PositionGetInteger(POSITION_TYPE);
+      if(cnt > 0) out += ",";
+      out += "{\"dir\":\"" + (ptype == POSITION_TYPE_BUY ? "buy" : "sell") + "\"";
+      out += ",\"symp\":\"" + PositionGetString(POSITION_SYMBOL) + "\"";
+      out += ",\"lot\":" + DoubleToString(PositionGetDouble(POSITION_VOLUME), 2);
+      out += ",\"entry\":" + DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN), 5);
+      out += ",\"pl\":" + DoubleToString(PositionGetDouble(POSITION_PROFIT), 2);
+      out += "}";
+      cnt++;
+     }
+   out += "]";
+   return(out);
+  }
+
+//+------------------------------------------------------------------+
 void OnTimer()
   {
    // rebuild touch history on each new M15 bar (and on first run)
@@ -445,6 +469,7 @@ void OnTimer()
    json += ",\"ma\":" + BuildMa();
    json += ",\"acct\":" + BuildAcct();
    json += ",\"deals\":" + BuildDeals();
+   json += ",\"pos\":" + BuildPos();
    json += ",\"events\":" + g_events;
    json += "}";
 
