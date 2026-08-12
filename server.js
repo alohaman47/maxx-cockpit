@@ -563,6 +563,168 @@ app.get('/api/stream', (req, res) => {
   req.on('close', () => { clearInterval(ping); clients.delete(res); });
 });
 
+// ---------- Session Playbook: system vs AI directional calls, graded ----------
+const NEXT_SESS = { ASIA: 'LONDON', LONDON: 'NY', NY: 'ASIA' };
+const etHM = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: 'numeric', hour12: false });
+function etNowHM() {
+  let h = 0, m = 0;
+  for (const p of etHM.formatToParts(new Date())) {
+    if (p.type === 'hour') h = parseInt(p.value, 10) % 24;
+    if (p.type === 'minute') m = parseInt(p.value, 10);
+  }
+  return { h, m };
+}
+function normBars(d) {
+  return d.bars.map(b => b.length >= 5 ? { t: b[0], h: b[2], l: b[3], c: b[4] } : { t: b[0], h: b[1], l: b[2], c: b[3] });
+}
+function segsOf(bars) {
+  const segs = [];
+  bars.forEach((b, i) => {
+    const s2 = sessOf(b.t);
+    if (!segs.length || segs[segs.length - 1].s !== s2) segs.push({ s: s2, a: i, b: i });
+    else segs[segs.length - 1].b = i;
+  });
+  return segs;
+}
+
+function gradePending(sym, endedSession, open, close) {
+  const tail = readTail('predictions.jsonl', 400);
+  const graded = new Set(tail.filter(e => e.kind === 'grade').map(e => e.id));
+  const pending = tail.filter(e => e.kind === 'pred' && e.sym === sym && e.nextSession === endedSession && !graded.has(e.id));
+  if (!pending.length) return;
+  const p = pending[pending.length - 1];
+  const nextNet = +(close - open).toFixed(5);
+  const thr = p.thr || 1;
+  const outcome = nextNet > thr ? 'UP' : (nextNet < -thr ? 'DOWN' : 'RANGE');
+  logAppend('predictions.jsonl', {
+    kind: 'grade', id: p.id, at: Date.now(), sym, session: endedSession, nextNet, outcome,
+    sysWin: p.sysCall === outcome, aiWin: p.aiCall ? p.aiCall === outcome : null
+  });
+  broadcast({ type: 'ai', sym, at: Date.now(), text: 'PLAYBOOK ตรวจคำทาย ' + endedSession + ': ผลจริง ' + outcome + ' — ระบบ' + (p.sysCall === outcome ? 'ถูก ✓' : 'ผิด ✗ (ทาย ' + p.sysCall + ')') + (p.aiCall ? ' · AI' + (p.aiCall === outcome ? 'ถูก ✓' : 'ผิด ✗ (ทาย ' + p.aiCall + ')') : '') });
+}
+
+async function runPlaybook(sym, sessName) {
+  const rec = snapshots[sym]; if (!rec) return;
+  const d = rec.data;
+  if (!d.bars || d.bars.length < 8) return;
+  const bars = normBars(d);
+  const segs = segsOf(bars);
+  let idx = -1;
+  for (let i = segs.length - 1; i >= 0; i--) if (segs[i].s === sessName) { idx = i; break; }
+  if (idx < 0) return;
+  const g = segs[idx];
+  const seg = bars.slice(g.a, g.b + 1);
+  const open = g.a > 0 ? bars[g.a - 1].c : seg[0].c;
+  let hi = -1e18, lo = 1e18;
+  seg.forEach(b => { hi = Math.max(hi, b.h); lo = Math.min(lo, b.l); });
+  const close = seg[seg.length - 1].c;
+  const net = close - open, range = (hi - lo) || 1;
+  const closePos = (close - lo) / range;
+  let pidx = idx - 1;
+  while (pidx >= 0 && segs[pidx].s === 'OFF') pidx--;
+  let prevHi = null, prevLo = null;
+  if (pidx >= 0) {
+    prevHi = -1e18; prevLo = 1e18;
+    for (let j = segs[pidx].a; j <= segs[pidx].b; j++) { prevHi = Math.max(prevHi, bars[j].h); prevLo = Math.min(prevLo, bars[j].l); }
+  }
+  const tol = d.zoneTol || 2;
+  const pdh = d.pd && d.pd.h, pdl = d.pd && d.pd.l;
+  const facts = {
+    open: +open.toFixed(5), hi: +hi.toFixed(5), lo: +lo.toFixed(5), close: +close.toFixed(5),
+    net: +net.toFixed(5), range: +range.toFixed(5), closePos: +closePos.toFixed(2),
+    brokePrevHi: prevHi != null && hi > prevHi,
+    brokePrevLo: prevLo != null && lo < prevLo,
+    brokePDH: !!(pdh && close > pdh),
+    brokePDL: !!(pdl && close < pdl),
+    rejPDH: !!(pdh && hi >= pdh - tol && close < pdh),
+    rejPDL: !!(pdl && lo <= pdl + tol && close > pdl)
+  };
+  // transparent mechanical rule
+  let sysCall = 'RANGE';
+  if ((facts.brokePDH || facts.brokePrevHi) && closePos > 0.6) sysCall = 'UP';
+  else if ((facts.brokePDL || facts.brokePrevLo) && closePos < 0.4) sysCall = 'DOWN';
+  else if (facts.rejPDH && closePos < 0.5) sysCall = 'DOWN';
+  else if (facts.rejPDL && closePos > 0.5) sysCall = 'UP';
+  const thr = +(range * 0.25).toFixed(5);
+  const nextSession = NEXT_SESS[sessName];
+  const id = sym + '-' + seg[seg.length - 1].t;
+
+  gradePending(sym, sessName, open, close);
+
+  let aiCall = null, aiText = null;
+  if (KIMI_KEY) {
+    try {
+      const factsTxt = sessName + ' (' + sym + '): open ' + facts.open + ', high ' + facts.hi + ', low ' + facts.lo + ', close ' + facts.close
+        + ', net ' + facts.net + ', close at ' + Math.round(closePos * 100) + '% of session range'
+        + (facts.brokePrevHi ? ', broke previous session high' : '') + (facts.brokePrevLo ? ', broke previous session low' : '')
+        + (facts.brokePDH ? ', CLOSED ABOVE PDH (new high vs yesterday)' : '') + (facts.brokePDL ? ', CLOSED BELOW PDL' : '')
+        + (facts.rejPDH ? ', tested PDH and REJECTED' : '') + (facts.rejPDL ? ', tested PDL and HELD' : '');
+      const text = await askKimi([
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: 'session เพิ่งปิด วิเคราะห์และทายทิศ session ถัดไป (' + nextSession + ')' + String.fromCharCode(10) + 'กติกาบังคับ: บรรทัดแรกต้องเป็นรูปแบบ "CALL: UP" หรือ "CALL: DOWN" หรือ "CALL: RANGE" เท่านั้น จากนั้นขึ้นบรรทัดใหม่เขียน 3-4 ประโยค: session ที่จบเกิดอะไรขึ้น (อ้างตัวเลขจริง) และแผนปฏิบัติสำหรับ ' + nextSession + ' ตามเทคนิค (bias + โซน WMA100)' + String.fromCharCode(10,10) + 'FACTS: ' + factsTxt + String.fromCharCode(10,10) + 'CONTEXT:' + String.fromCharCode(10) + snapshotContext(sym) }
+      ], 1200);
+      const mm = /CALL:\s*(UP|DOWN|RANGE)/i.exec(text || '');
+      if (mm) aiCall = mm[1].toUpperCase();
+      aiText = (text || '').replace(/^.*CALL:.*$/im, '').trim().slice(0, 600);
+    } catch (e) { noteAiError(e.message); }
+  }
+  logAppend('predictions.jsonl', {
+    kind: 'pred', id, at: Date.now(), sym, session: sessName, nextSession,
+    facts, sysCall, aiCall, aiText, thr
+  });
+  broadcast({ type: 'ai', sym, at: Date.now(), text: 'PLAYBOOK: ' + sessName + ' จบ — ทาย ' + nextSession + ' | ระบบ: ' + sysCall + (aiCall ? ' · AI: ' + aiCall : '') });
+}
+
+const pbDone = {};
+setInterval(() => {
+  const { h, m } = etNowHM();
+  const SESS_END = { 3: 'ASIA', 8: 'LONDON', 17: 'NY' };
+  const ended = SESS_END[h];
+  if (!ended || m < 3 || m > 25) return;
+  const dayKey = new Date().toISOString().slice(0, 10) + '-' + h;
+  for (const sym of Object.keys(snapshots)) {
+    if (pbDone[sym] === dayKey) continue;
+    if (Date.now() - snapshots[sym].at > 120000) continue;
+    pbDone[sym] = dayKey;
+    runPlaybook(sym, ended).catch(e => console.error('playbook failed:', e.message));
+  }
+}, 60000);
+
+app.get('/api/playbook', (req, res) => {
+  const sym = req.query.sym || Object.keys(snapshots)[0] || 'XAUUSD';
+  const tail = readTail('predictions.jsonl', 500).filter(e => e.sym === sym);
+  const preds = tail.filter(e => e.kind === 'pred');
+  const grades = tail.filter(e => e.kind === 'grade');
+  const gmap = {}; grades.forEach(gg => gmap[gg.id] = gg);
+  const latest = preds.length ? preds[preds.length - 1] : null;
+  let lastGraded = null;
+  for (let i = preds.length - 1; i >= 0; i--) if (gmap[preds[i].id]) { lastGraded = { pred: preds[i], grade: gmap[preds[i].id] }; break; }
+  const sysG = grades.filter(gg => typeof gg.sysWin === 'boolean');
+  const aiG = grades.filter(gg => typeof gg.aiWin === 'boolean');
+  res.json({
+    latest, lastGraded,
+    score: {
+      n: grades.length,
+      sysAcc: sysG.length ? Math.round(100 * sysG.filter(gg => gg.sysWin).length / sysG.length) : null,
+      aiAcc: aiG.length ? Math.round(100 * aiG.filter(gg => gg.aiWin).length / aiG.length) : null
+    }
+  });
+});
+
+app.post('/api/playbook/run', async (req, res) => {
+  if (!pinOk(req)) return res.status(401).json({ ok: false, error: 'bad pin' });
+  const sym = (req.body && req.body.sym) || Object.keys(snapshots)[0];
+  const rec = snapshots[sym];
+  if (!rec || !rec.data.bars) return res.status(400).json({ ok: false, error: 'no bar data (EA v0.3+)' });
+  const bars = normBars(rec.data);
+  const segs = segsOf(bars).filter(g => g.s !== 'OFF');
+  if (!segs.length) return res.status(400).json({ ok: false, error: 'no session data' });
+  let target = segs[segs.length - 1];
+  if (target.b === bars.length - 1 && segs.length > 1) target = segs[segs.length - 2]; // skip live session
+  await runPlaybook(sym, target.s);
+  res.json({ ok: true, session: target.s });
+});
+
 // ---------- Quant Lab ----------
 function pctl(arr, p) {
   if (!arr.length) return 0;
