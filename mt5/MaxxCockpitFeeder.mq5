@@ -5,7 +5,7 @@
 //| Attach to an M15 chart of each symbol you want on the dashboard. |
 //+------------------------------------------------------------------+
 #property copyright "Maxx"
-#property version   "0.50"
+#property version   "0.60"
 #property strict
 
 input string InpURL         = "https://your-app.up.railway.app/api/snapshot"; // Server URL (/api/snapshot)
@@ -14,11 +14,16 @@ input int    InpIntervalSec = 2;             // Send interval (seconds)
 input double InpZoneTol     = 2.0;           // Touch zone tolerance (price units, e.g. 2.0 for XAUUSD)
 input int    InpScanBars    = 300;           // Closed M15 bars to scan for touch history
 input int    InpMaxEvents   = 10;            // Max history events to send
+input int    InpMaxTradesDay  = 6;           // Risk: max trades per day
+input int    InpMaxLossStreak = 3;           // Risk: max consecutive losses
+input double InpMaxDayLossPct = 3.0;         // Risk: max daily loss (% of balance)
 
 // --- indicator handles ---
 int hW50, hW89, hW100, hW144, hE200, hW800, hSAR, hH4W50, hH1W50, hH1W100;
 
 datetime g_lastM15  = 0;
+ulong    g_lastDeal = 0;
+bool     g_dealInit = false;
 string   g_events   = "[]";
 
 struct TouchEvent
@@ -274,6 +279,96 @@ string BuildMa()
   }
 
 //+------------------------------------------------------------------+
+// Account risk stats for today (server day boundary = NY close)
+string BuildAcct()
+  {
+   double bal = AccountInfoDouble(ACCOUNT_BALANCE);
+   double eq  = AccountInfoDouble(ACCOUNT_EQUITY);
+   datetime dayStart = iTime(_Symbol, PERIOD_D1, 0);
+   double dayPL = 0.0; int trades = 0; int streak = 0;
+   if(HistorySelect(dayStart, TimeCurrent() + 3600))
+     {
+      int total = HistoryDealsTotal();
+      for(int i = 0; i < total; i++)
+        {
+         ulong tk = HistoryDealGetTicket(i);
+         if(tk == 0) continue;
+         long en = HistoryDealGetInteger(tk, DEAL_ENTRY);
+         double pl = HistoryDealGetDouble(tk, DEAL_PROFIT)
+                   + HistoryDealGetDouble(tk, DEAL_SWAP)
+                   + HistoryDealGetDouble(tk, DEAL_COMMISSION);
+         if(en == DEAL_ENTRY_IN) trades++;
+         else if(en == DEAL_ENTRY_OUT)
+           {
+            dayPL += pl;
+            if(pl < 0.0) streak++; else streak = 0;
+           }
+        }
+     }
+   string out = "{";
+   out += "\"bal\":" + DoubleToString(bal, 2);
+   out += ",\"eq\":" + DoubleToString(eq, 2);
+   out += ",\"dayPL\":" + DoubleToString(dayPL, 2);
+   out += ",\"trades\":" + IntegerToString(trades);
+   out += ",\"streak\":" + IntegerToString(streak);
+   out += ",\"openPos\":" + IntegerToString(PositionsTotal());
+   out += ",\"limTrades\":" + IntegerToString(InpMaxTradesDay);
+   out += ",\"limStreak\":" + IntegerToString(InpMaxLossStreak);
+   out += ",\"limLossPct\":" + DoubleToString(InpMaxDayLossPct, 2);
+   out += "}";
+   return(out);
+  }
+
+//+------------------------------------------------------------------+
+// Report account deals newer than last seen (for trade attribution).
+// First run only baselines the latest ticket so old history is not resent.
+string BuildDeals()
+  {
+   if(!HistorySelect(TimeCurrent() - 172800, TimeCurrent() + 3600)) return("[]");
+   int total = HistoryDealsTotal();
+   if(!g_dealInit)
+     {
+      for(int i = 0; i < total; i++)
+        {
+         ulong tk = HistoryDealGetTicket(i);
+         if(tk > g_lastDeal) g_lastDeal = tk;
+        }
+      g_dealInit = true;
+      return("[]");
+     }
+   long tzOff = (long)TimeGMT() - (long)TimeCurrent();
+   string out = "["; int cnt = 0; ulong maxTk = g_lastDeal;
+   for(int i = 0; i < total && cnt < 20; i++)
+     {
+      ulong tk = HistoryDealGetTicket(i);
+      if(tk <= g_lastDeal) continue;
+      if(tk > maxTk) maxTk = tk;
+      long en = HistoryDealGetInteger(tk, DEAL_ENTRY);
+      if(en != DEAL_ENTRY_IN && en != DEAL_ENTRY_OUT) continue;
+      long dtype = HistoryDealGetInteger(tk, DEAL_TYPE);
+      if(dtype != DEAL_TYPE_BUY && dtype != DEAL_TYPE_SELL) continue;
+      double pl = HistoryDealGetDouble(tk, DEAL_PROFIT)
+                + HistoryDealGetDouble(tk, DEAL_SWAP)
+                + HistoryDealGetDouble(tk, DEAL_COMMISSION);
+      if(cnt > 0) out += ",";
+      out += "{\"id\":" + IntegerToString((long)tk);
+      out += ",\"pos\":" + IntegerToString(HistoryDealGetInteger(tk, DEAL_POSITION_ID));
+      out += ",\"e\":\"" + (en == DEAL_ENTRY_IN ? "in" : "out") + "\"";
+      out += ",\"dir\":\"" + (dtype == DEAL_TYPE_BUY ? "buy" : "sell") + "\"";
+      out += ",\"symd\":\"" + HistoryDealGetString(tk, DEAL_SYMBOL) + "\"";
+      out += ",\"price\":" + DoubleToString(HistoryDealGetDouble(tk, DEAL_PRICE), 5);
+      out += ",\"lot\":" + DoubleToString(HistoryDealGetDouble(tk, DEAL_VOLUME), 2);
+      out += ",\"pl\":" + DoubleToString(pl, 2);
+      out += ",\"t\":" + IntegerToString((long)HistoryDealGetInteger(tk, DEAL_TIME) + tzOff);
+      out += "}";
+      cnt++;
+     }
+   g_lastDeal = maxTk;
+   out += "]";
+   return(out);
+  }
+
+//+------------------------------------------------------------------+
 void OnTimer()
   {
    // rebuild touch history on each new M15 bar (and on first run)
@@ -348,6 +443,8 @@ void OnTimer()
    json += ",\"dist100\":" + Jd(dist100) + "}";
    json += ",\"bars\":" + BuildBars();
    json += ",\"ma\":" + BuildMa();
+   json += ",\"acct\":" + BuildAcct();
+   json += ",\"deals\":" + BuildDeals();
    json += ",\"events\":" + g_events;
    json += "}";
 
