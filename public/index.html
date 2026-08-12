@@ -161,6 +161,19 @@
   .overlay h1{font-family:var(--serif);color:var(--sell);font-size:28px;letter-spacing:.12em;margin-bottom:8px}
   .overlay p{color:var(--dim);font-size:14px;font-family:var(--mono)}
   .overlay.waiting .box{border-color:var(--wait)}
+  .sysbtn-warn{color:var(--wait) !important;border-color:rgba(245,197,66,.55) !important}
+  .sysmodal{position:fixed;inset:0;background:rgba(8,9,13,.86);backdrop-filter:blur(4px);display:none;place-items:center;z-index:120;padding:20px}
+  .sysmodal.show{display:grid}
+  .sysbox{width:min(860px,100%);max-height:88vh;overflow:auto;background:linear-gradient(180deg,#141822,#0e1016);border:1px solid var(--hair);border-radius:16px;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.6)}
+  .sysbox h2{font-family:var(--serif);font-size:16px;letter-spacing:.16em;color:var(--gold2);margin-bottom:14px}
+  .sysgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:16px}
+  .syscell{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-family:var(--mono);font-size:11.5px}
+  .syscell .sl{color:var(--dim);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+  .syscell .sv{font-size:14px;font-weight:700;margin-top:3px}
+  .systable{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+  .systable th{text-align:left;color:var(--dim);font-size:10.5px;letter-spacing:.1em;padding:6px 8px;border-bottom:1px solid var(--line)}
+  .systable td{padding:7px 8px;border-bottom:1px solid rgba(36,41,56,.5);vertical-align:top}
+  .sysclose{margin-top:16px;width:100%;padding:11px;border-radius:10px;border:1px solid var(--hair2);background:linear-gradient(120deg,rgba(217,178,74,.16),rgba(217,178,74,.04));color:#ecd9a0;font-weight:700;cursor:pointer;font-family:var(--thai)}
   .overlay.waiting h1{color:var(--wait)}
 </style>
 </head>
@@ -172,6 +185,7 @@
   <div class="tf">M15</div>
   <div class="spacer"></div>
   <a class="sndbtn" href="/quant.html" style="text-decoration:none">QUANT LAB</a>
+  <button class="sndbtn" id="sysbtn" onclick="openSys()">SYSTEM</button>
   <div class="newschip" id="newschip"></div>
   <button class="sndbtn" id="sndbtn">เสียงเตือน · OFF</button>
   <div class="conn"><span class="dot" id="conndot"></span> <span id="conntxt">MT5 BRIDGE</span></div>
@@ -265,6 +279,15 @@
       <div class="feed" id="feed"></div>
       <div class="footer">MAXX COCKPIT v1.0 · live · กดออเดอร์จริงใน MT5</div>
     </div>
+  </div>
+</div>
+
+<div class="sysmodal" id="sysmodal">
+  <div class="sysbox">
+    <h2>SYSTEM REPORT — วิศวกรประจำ app</h2>
+    <div class="sysgrid" id="sysgrid"></div>
+    <div id="sysincidents"></div>
+    <button class="sysclose" onclick="closeSys()">รับทราบ — ปิดรายงาน</button>
   </div>
 </div>
 
@@ -831,6 +854,54 @@ function updateNews(){
 }
 setInterval(updateNews, 20000);
 setInterval(loadNews, 5 * 60000);
+
+// ---- resident engineer: system report ----
+S.sys = { data: null, autoShown: false };
+var SYS_LABEL = {
+  server_restart: 'ระบบรีสตาร์ท (deploy/ล่ม)',
+  feed_gap: 'Feed จาก MT5 ขาดช่วง',
+  news_stale: 'ปฏิทินข่าวค้าง',
+  ai_error: 'AI ตอบไม่ได้'
+};
+async function loadSys(){
+  try { S.sys.data = await (await fetch('/api/system?hours=24')).json(); } catch(e){ return; }
+  var q = S.sys.data, btn = el('sysbtn');
+  var bad = (q.incidents || []).length;
+  btn.textContent = bad ? ('SYSTEM ⚠ ' + bad) : 'SYSTEM ✓';
+  btn.classList.toggle('sysbtn-warn', bad > 0);
+  if (bad > 0 && !S.sys.autoShown && !sessionStorage.getItem('sysSeen')){
+    S.sys.autoShown = true;
+    try { sessionStorage.setItem('sysSeen', '1'); } catch(e){}
+    openSys();
+  }
+}
+function openSys(){
+  var q = S.sys.data;
+  if (!q){ loadSys(); return; }
+  var feeds = Object.keys(q.feeds || {}).map(function(sm){
+    var a = q.feeds[sm].ageSec;
+    return '<div class="syscell"><div class="sl">Feed ' + sm + '</div><div class="sv" style="color:' + (a < 30 ? 'var(--buy)' : 'var(--sell)') + '">' + (a < 30 ? 'สด (' + a + 's)' : 'ค้าง ' + a + 's') + '</div></div>';
+  }).join('');
+  el('sysgrid').innerHTML = feeds
+    + '<div class="syscell"><div class="sl">Uptime server</div><div class="sv">' + Math.floor(q.uptimeMin / 60) + ' ชม ' + (q.uptimeMin % 60) + ' น</div></div>'
+    + '<div class="syscell"><div class="sl">ปฏิทินข่าว</div><div class="sv" style="color:' + (q.newsAgeMin != null && q.newsAgeMin < 180 ? 'var(--buy)' : 'var(--sell)') + '">' + (q.newsAgeMin == null ? 'ยังไม่โหลด' : 'อัพเดต ' + q.newsAgeMin + ' น.ก่อน (' + q.newsEvents + ')') + '</div></div>'
+    + '<div class="syscell"><div class="sl">AI ชั่วโมงนี้</div><div class="sv">' + q.aiCallsHour + ' ครั้ง</div></div>'
+    + '<div class="syscell"><div class="sl">Memory</div><div class="sv">' + q.memMB + ' MB</div></div>'
+    + '<div class="syscell"><div class="sl">สมุดวิจัย (KB)</div><div class="sv" style="font-size:11px">' + ['events','sar','trades'].map(function(k){ return k + ' ' + (q.files[k + '.jsonl'] || 0); }).join(' · ') + '</div></div>'
+    + '<div class="syscell"><div class="sl">Volume</div><div class="sv" style="color:' + (q.persisted ? 'var(--buy)' : 'var(--sell)') + '">' + (q.persisted ? 'ถาวร ✓' : 'ชั่วคราว!') + '</div></div>';
+  var inc = q.incidents || [];
+  el('sysincidents').innerHTML = inc.length
+    ? '<table class="systable"><tr><th>เวลา (ET)</th><th>เหตุการณ์</th><th>รายละเอียด</th></tr>'
+      + inc.map(function(e){
+          var extra = e.durMin ? (' · นาน ' + e.durMin + ' นาที') : '';
+          return '<tr><td>' + etTime(new Date(e.at)) + '</td><td style="color:' + (e.type === 'feed_gap' ? 'var(--sell)' : 'var(--wait)') + '">' + (SYS_LABEL[e.type] || e.type) + '</td><td style="color:var(--dim)">' + String(e.detail || '').replace(/</g, '&lt;') + extra + '</td></tr>';
+        }).join('') + '</table>'
+    : '<div style="font-family:var(--mono);font-size:12.5px;color:var(--buy);padding:6px 0">✓ 24 ชั่วโมงที่ผ่านมาไม่มีเหตุการณ์ผิดปกติ — ทุกระบบทำงานเรียบร้อย</div>';
+  el('sysmodal').classList.add('show');
+}
+function closeSys(){ el('sysmodal').classList.remove('show'); }
+loadSys();
+setInterval(loadSys, 60000);
 </script>
 </body>
 </html>
