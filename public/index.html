@@ -267,6 +267,11 @@
       <div id="candhint" class="plan" style="display:none"></div>
     </div>
     <div class="panel">
+      <div class="ptitle">M5 Trigger — จังหวะเข้าละเอียด (4 ชม.ล่าสุด) <span id="m5chip" class="pbcall" style="float:right;font-size:11px"></span></div>
+      <svg id="m5chart" viewBox="0 0 1000 240" style="width:100%;height:auto;display:block"></svg>
+      <div id="m5hint" class="plan" style="display:none"></div>
+    </div>
+    <div class="panel">
       <div class="ptitle">Session Playbook — ระบบ vs AI ทายทิศ</div>
       <div id="pbbox"><div class="plan">รอ session แรกปิด (03:00 / 08:00 / 17:00 ET) ระบบจะวิเคราะห์เอง หรือกดวิเคราะห์ทันที</div></div>
       <button class="aibtn" id="pbrun" style="margin-top:10px">วิเคราะห์ session ที่เพิ่งจบตอนนี้</button>
@@ -628,6 +633,7 @@ function render(){
   // session map
   renderSessions(d, dg);
   renderCandles(d, dg);
+  renderM5(d, dg, bb);
 
   // feed
   el('feed').innerHTML = (S.feed[S.active]||[]).map(function(ev){
@@ -864,6 +870,54 @@ function renderCandles(d, dg){
   var lb = bars[N - 1];
   out += '<text x="' + (W - padR + 4) + '" y="' + (Y(lb.c) + 3).toFixed(1) + '" font-size="11" fill="var(--gold2)" font-family="monospace" font-weight="bold">' + fmt(lb.c, dg) + '</text>';
   svg.innerHTML = out;
+}
+
+// ---- M5 trigger chart ----
+function renderM5(d, dg, bb){
+  var svg = el('m5chart'), hint = el('m5hint'), chip = el('m5chip');
+  var ok = Array.isArray(d.m5bars) && d.m5bars.length > 5;
+  if (!ok){
+    svg.style.display = 'none'; chip.style.display = 'none';
+    hint.style.display = ''; hint.textContent = 'ต้องอัพ EA v0.70 บน VPS เพื่อเปิดกราฟ M5';
+    return;
+  }
+  hint.style.display = 'none'; svg.style.display = 'block'; chip.style.display = 'inline-block';
+  var bars = d.m5bars.map(function(b){ return {ts:b[0], o:b[1], h:b[2], l:b[3], c:b[4]}; });
+  var N = bars.length;
+  var tol = d.zoneTol || 0, zl = d.lines && d.lines.WMA100;
+  var W = 1000, H = 240, padL = 8, padR = 76, padT = 10, padB = 8;
+  var hi = -1e18, lo = 1e18;
+  bars.forEach(function(b){ hi = Math.max(hi, b.h); lo = Math.min(lo, b.l); });
+  if (zl){ hi = Math.max(hi, zl + tol); lo = Math.min(lo, zl - tol); }
+  var span = (hi - lo) || 1; hi += span * .04; lo -= span * .04; span = hi - lo;
+  function X(i){ return padL + (W - padL - padR) * (i + .5) / N; }
+  function Y(v){ return padT + (H - padT - padB) * (1 - (v - lo) / span); }
+  var cw = Math.max(3, (W - padL - padR) / N * .62);
+  var out = '';
+  if (zl){
+    out += '<rect x="' + padL + '" y="' + Y(zl + tol).toFixed(1) + '" width="' + (W - padL - padR) + '" height="' + (Y(zl - tol) - Y(zl + tol)).toFixed(1) + '" fill="rgba(245,197,66,.10)"/>';
+    out += '<line x1="' + padL + '" y1="' + Y(zl).toFixed(1) + '" x2="' + (W - padR) + '" y2="' + Y(zl).toFixed(1) + '" stroke="var(--wma100)" stroke-width="1.4"/>';
+    out += '<text x="' + (W - padR + 4) + '" y="' + (Y(zl) + 3).toFixed(1) + '" font-size="9" fill="var(--wma100)" font-family="monospace">W100 M15</text>';
+  }
+  bars.forEach(function(b, i){
+    var up = b.c >= b.o, col = up ? 'var(--buy)' : 'var(--sell)';
+    var x = X(i);
+    out += '<line x1="' + x.toFixed(1) + '" y1="' + Y(b.h).toFixed(1) + '" x2="' + x.toFixed(1) + '" y2="' + Y(b.l).toFixed(1) + '" stroke="' + col + '" stroke-width="1"/>';
+    var yo = Y(Math.max(b.o, b.c)), hgt = Math.max(1, Math.abs(Y(b.o) - Y(b.c)));
+    out += '<rect x="' + (x - cw / 2).toFixed(1) + '" y="' + yo.toFixed(1) + '" width="' + cw.toFixed(1) + '" height="' + hgt.toFixed(1) + '" fill="' + col + '" ' + (up ? 'fill-opacity=".85"' : '') + '/>';
+  });
+  var lb = bars[N - 1];
+  out += '<text x="' + (W - padR + 4) + '" y="' + (Y(lb.c) + 3).toFixed(1) + '" font-size="11" fill="var(--gold2)" font-family="monospace" font-weight="bold">' + fmt(lb.c, dg) + '</text>';
+  svg.innerHTML = out;
+  // trigger chip: last CLOSED M5 candle vs bias, armed only in M15 zone
+  var closed = bars[N - 2], bull = closed.c >= closed.o;
+  var inZone = !!(d.checks && d.checks.inZone100);
+  var txt, col2;
+  if (!inZone){ txt = 'นอกโซน — ยังไม่ armed'; col2 = 'var(--dim)'; }
+  else if (bb === bull){ txt = 'M5 ยืนยันแล้ว — เข้าได้เร็วกว่ารอ M15'; col2 = 'var(--buy)'; }
+  else { txt = 'ในโซน — รอแท่ง M5 ปิด' + (bb ? 'เขียว' : 'แดง'); col2 = 'var(--wait)'; }
+  chip.style.background = 'transparent'; chip.style.border = '1px solid ' + col2; chip.style.color = col2;
+  chip.textContent = txt;
 }
 
 // ---- economic news + NEWS LOCK ----
