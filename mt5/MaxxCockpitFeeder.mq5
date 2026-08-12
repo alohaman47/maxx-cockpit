@@ -5,7 +5,7 @@
 //| Attach to an M15 chart of each symbol you want on the dashboard. |
 //+------------------------------------------------------------------+
 #property copyright "Maxx"
-#property version   "0.40"
+#property version   "0.50"
 #property strict
 
 input string InpURL         = "https://your-app.up.railway.app/api/snapshot"; // Server URL (/api/snapshot)
@@ -16,7 +16,7 @@ input int    InpScanBars    = 300;           // Closed M15 bars to scan for touc
 input int    InpMaxEvents   = 10;            // Max history events to send
 
 // --- indicator handles ---
-int hW50, hW89, hW100, hW144, hE200, hW800, hSAR, hH4W50;
+int hW50, hW89, hW100, hW144, hE200, hW800, hSAR, hH4W50, hH1W50, hH1W100;
 
 datetime g_lastM15  = 0;
 string   g_events   = "[]";
@@ -41,10 +41,13 @@ int OnInit()
    hW800  = iMA(_Symbol, PERIOD_M15, 800, 0, MODE_LWMA, PRICE_CLOSE);
    hSAR   = iSAR(_Symbol, PERIOD_M15, 0.02, 0.2);
    hH4W50 = iMA(_Symbol, PERIOD_H4, 50, 0, MODE_LWMA, PRICE_CLOSE);
+   hH1W50  = iMA(_Symbol, PERIOD_H1, 50,  0, MODE_LWMA, PRICE_CLOSE);
+   hH1W100 = iMA(_Symbol, PERIOD_H1, 100, 0, MODE_LWMA, PRICE_CLOSE);
 
    if(hW50==INVALID_HANDLE || hW89==INVALID_HANDLE || hW100==INVALID_HANDLE ||
       hW144==INVALID_HANDLE || hE200==INVALID_HANDLE || hW800==INVALID_HANDLE ||
-      hSAR==INVALID_HANDLE || hH4W50==INVALID_HANDLE)
+      hSAR==INVALID_HANDLE || hH4W50==INVALID_HANDLE ||
+      hH1W50==INVALID_HANDLE || hH1W100==INVALID_HANDLE)
      {
       Print("MaxxCockpitFeeder: failed to create indicator handles");
       return(INIT_FAILED);
@@ -244,10 +247,30 @@ string BuildBars()
      {
       if(i < got - 1) out += ",";
       out += "[" + IntegerToString((long)r[i].time + off);
-      out += "," + Jd(r[i].high) + "," + Jd(r[i].low) + "," + Jd(r[i].close) + "]";
+      out += "," + Jd(r[i].open) + "," + Jd(r[i].high);
+      out += "," + Jd(r[i].low) + "," + Jd(r[i].close) + "]";
      }
    out += "]";
    return(out);
+  }
+
+//+------------------------------------------------------------------+
+// WMA50/WMA100 values for the last 96 M15 bars (oldest -> newest),
+// aligned with BuildBars output, for the dashboard candle chart.
+string BuildMa()
+  {
+   int n = 96;
+   double a50[], a100[];
+   ArraySetAsSeries(a50, true); ArraySetAsSeries(a100, true);
+   if(CopyBuffer(hW50, 0, 0, n, a50) < n)   return("null");
+   if(CopyBuffer(hW100, 0, 0, n, a100) < n) return("null");
+   string s50 = "[", s100 = "[";
+   for(int i = n - 1; i >= 0; i--)
+     {
+      if(i < n - 1) { s50 += ","; s100 += ","; }
+      s50 += Jd(a50[i]); s100 += Jd(a100[i]);
+     }
+   return("{\"w50\":" + s50 + "],\"w100\":" + s100 + "]}");
   }
 
 //+------------------------------------------------------------------+
@@ -270,6 +293,10 @@ void OnTimer()
 
    bool sarUp   = (sarv < bid);
    int  sarBars = SarBarsSinceFlip();
+
+   // H1 confirm lines
+   double h1w50  = BufVal(hH1W50, 0);
+   double h1w100 = BufVal(hH1W100, 0);
 
    // previous day levels (D1 shift 1 - broker day = NY close boundary)
    double pdh = iHigh(_Symbol, PERIOD_D1, 1);
@@ -312,6 +339,7 @@ void OnTimer()
    json += ",\"sar\":{\"val\":" + Jd(sarv) + ",\"up\":" + Jb(sarUp);
    json += ",\"bars\":" + IntegerToString(sarBars) + "}";
    json += ",\"pd\":{\"h\":" + Jd(pdh) + ",\"l\":" + Jd(pdl) + "}";
+   json += ",\"h1\":{\"wma50\":" + Jd(h1w50) + ",\"wma100\":" + Jd(h1w100) + "}";
    json += ",\"h4\":{\"wma50\":" + Jd(h4wNow) + ",\"biasBuy\":" + Jb(biasBuy);
    json += ",\"dist\":" + Jd(bid - h4wNow) + "}";
    json += ",\"checks\":{\"stackOk\":" + Jb(stackOk) + ",\"emaOk\":" + Jb(emaOk);
@@ -319,6 +347,7 @@ void OnTimer()
    json += ",\"bounceConfirm\":" + Jb(bounceConfirm);
    json += ",\"dist100\":" + Jd(dist100) + "}";
    json += ",\"bars\":" + BuildBars();
+   json += ",\"ma\":" + BuildMa();
    json += ",\"events\":" + g_events;
    json += "}";
 
