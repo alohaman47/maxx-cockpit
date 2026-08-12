@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MAXX QUANT LAB</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@400;500;600;700&family=Cinzel:wght@600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#08090d; --panel:#10131a; --panel2:#161a24; --line:#242938;
+    --hair:rgba(233,208,138,.16); --hair2:rgba(233,208,138,.4);
+    --text:#eceef2; --dim:#8f96a5;
+    --buy:#25c684; --sell:#f0506a; --wait:#f5c542; --gold:#d9b24a; --gold2:#e9d08a;
+    --mono:'JetBrains Mono',ui-monospace,Consolas,monospace;
+    --serif:'Cinzel','Anuphan',serif;
+    --thai:'Anuphan',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:radial-gradient(1100px 520px at 72% -8%,rgba(217,178,74,.055),transparent 60%),var(--bg);color:var(--text);font-family:var(--thai);min-height:100vh;padding:16px}
+  .topbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:12px 18px;background:linear-gradient(180deg,#151823,#0e1117);border:1px solid var(--hair);border-radius:14px;margin-bottom:14px;box-shadow:0 1px 0 rgba(233,208,138,.22) inset}
+  .brand{font-family:var(--serif);font-weight:700;letter-spacing:.2em;font-size:15px}
+  .brand span{background:linear-gradient(120deg,#f3e4ad,#d9b24a 48%,#a87f2c);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .back{font-size:12px;color:var(--dim);text-decoration:none;border:1px solid var(--line);padding:6px 12px;border-radius:8px}
+  .spacer{flex:1}
+  .sel{display:flex;gap:6px}
+  .selbtn{padding:6px 13px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--dim);font-size:12px;font-weight:600;cursor:pointer;font-family:var(--thai)}
+  .selbtn.active{background:linear-gradient(120deg,rgba(217,178,74,.18),rgba(217,178,74,.05));color:#ecd9a0;border-color:var(--hair2)}
+  .warn{display:none;margin-bottom:14px;padding:12px 16px;border-radius:12px;border:1px solid rgba(245,197,66,.5);background:linear-gradient(90deg,rgba(245,197,66,.12),transparent);color:var(--wait);font-size:13px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+  .panel{background:linear-gradient(180deg,#141822,#0e1016);border:1px solid var(--hair);border-radius:14px;padding:17px;box-shadow:0 1px 0 rgba(233,208,138,.2) inset}
+  .ptitle{font-size:10.5px;letter-spacing:.24em;color:#a79c80;font-weight:600;margin-bottom:14px;text-transform:uppercase}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px}
+  .kcard{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .kcard .kl{font-size:10.5px;letter-spacing:.14em;color:var(--dim);text-transform:uppercase}
+  .kcard .kv{font-family:var(--mono);font-size:22px;font-weight:700;margin-top:4px;color:var(--gold2)}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+  th{text-align:right;color:var(--dim);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line);font-size:10.5px;letter-spacing:.08em}
+  th:first-child,td:first-child{text-align:left}
+  td{text-align:right;padding:7px 8px;border-bottom:1px solid rgba(36,41,56,.5)}
+  .pos{color:var(--buy)} .neg{color:var(--sell)} .mid{color:var(--wait)}
+  .bar{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-family:var(--mono);font-size:12px}
+  .bar .bl{width:86px;color:var(--dim);flex-shrink:0}
+  .bar .btrack{flex:1;height:14px;background:var(--panel2);border-radius:7px;overflow:hidden}
+  .bar .bfill{height:100%;background:linear-gradient(90deg,#e9d08a,#c69a3e);border-radius:7px}
+  .bar .bv{width:84px;text-align:right;flex-shrink:0}
+  .empty{color:var(--dim);font-size:12.5px;font-family:var(--mono);padding:8px 0}
+  .footer{margin-top:14px;text-align:center;font-size:11px;color:var(--dim);font-family:var(--mono)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">MAXX <span>QUANT LAB</span></div>
+  <a class="back" href="/">← COCKPIT</a>
+  <div class="spacer"></div>
+  <div class="sel" id="symsel"></div>
+  <div class="sel" id="daysel"></div>
+</div>
+
+<div class="warn" id="warn"></div>
+
+<div class="cards" id="kpis"></div>
+
+<div class="grid">
+  <div class="panel" style="grid-column:1/-1">
+    <div class="ptitle">Line Performance — expectancy ต่อการชนหนึ่งครั้ง</div>
+    <div id="linetable"></div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">WMA100 — hold rate แยก session</div>
+    <div id="w100sess"></div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">WMA100 — แยกสภาพ stack / bias / เกรด</div>
+    <div id="w100split"></div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">SAR เม็ดแรก — แม่นแค่ไหน</div>
+    <div id="sarbox"></div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">H4 Bias Regimes</div>
+    <div id="biasbox"></div>
+  </div>
+</div>
+
+<div class="footer">MAXX QUANT LAB · คำนวณจากข้อมูลที่ cockpit บันทึกจริงเท่านั้น · sample น้อย = อย่าเพิ่งเชื่อ</div>
+
+<script>
+'use strict';
+var Q = { sym: null, days: 30, syms: [] };
+function el(id){ return document.getElementById(id); }
+function f2(v){ return Number(v || 0).toFixed(2); }
+function holdCls(h){ return h >= 65 ? 'pos' : h >= 45 ? 'mid' : 'neg'; }
+
+async function init(){
+  try {
+    var h = await (await fetch('/health')).json();
+    Q.syms = h.symbols && h.symbols.length ? h.symbols : ['XAUUSD'];
+  } catch(e){ Q.syms = ['XAUUSD']; }
+  Q.sym = Q.syms[0];
+  renderSel();
+  load();
+}
+function renderSel(){
+  el('symsel').innerHTML = Q.syms.map(function(s){
+    return '<button class="selbtn' + (s === Q.sym ? ' active' : '') + '" onclick="setSym(\'' + s + '\')">' + s + '</button>';
+  }).join('');
+  el('daysel').innerHTML = [7, 30, 90].map(function(d){
+    return '<button class="selbtn' + (d === Q.days ? ' active' : '') + '" onclick="setDays(' + d + ')">' + d + ' วัน</button>';
+  }).join('');
+}
+function setSym(s){ Q.sym = s; renderSel(); load(); }
+function setDays(d){ Q.days = d; renderSel(); load(); }
+
+async function load(){
+  var q;
+  try { q = await (await fetch('/api/quant?sym=' + encodeURIComponent(Q.sym) + '&days=' + Q.days)).json(); }
+  catch(e){ el('warn').style.display = 'block'; el('warn').textContent = 'โหลดข้อมูลไม่ได้: ' + e.message; return; }
+
+  var w = el('warn');
+  if (q.lowSample){
+    w.style.display = 'block';
+    w.textContent = 'ข้อมูลยังน้อย (' + q.totals.events + ' events, เก็บมา ' + q.recordedDays + ' วัน) — ตัวเลขยังไม่นิ่ง อย่าเพิ่งใช้ตัดสินใจจริง ปล่อยให้ระบบเก็บต่อ';
+  } else w.style.display = 'none';
+
+  el('kpis').innerHTML =
+      kpi('เก็บข้อมูลมา', q.recordedDays + ' วัน')
+    + kpi('Line events', q.totals.events)
+    + kpi('SAR regimes', q.totals.sarRegimes)
+    + kpi('Bias regimes', q.totals.biasRegimes);
+
+  // line table
+  var names = Object.keys(q.lineStats);
+  if (!names.length) el('linetable').innerHTML = '<div class="empty">ยังไม่มีการชนเส้นในช่วงที่เลือก</div>';
+  else {
+    var order = ['WMA50','WMA89','WMA100','WMA144','EMA200','WMA800'];
+    names.sort(function(a,b){ return order.indexOf(a) - order.indexOf(b); });
+    el('linetable').innerHTML = '<table><tr><th>เส้น</th><th>n</th><th>เด้ง</th><th>ทะลุ</th><th>hold</th><th>เด้งเฉลี่ย</th><th>เด้ง median</th><th>ทะลุลึกเฉลี่ย</th><th>expectancy</th></tr>'
+      + names.map(function(nm){
+          var L = q.lineStats[nm];
+          return '<tr><td>' + nm + '</td><td>' + L.n + '</td><td>' + L.bounces + '</td><td>' + L.breaks + '</td>'
+            + '<td class="' + holdCls(L.holdRate) + '">' + L.holdRate + '%</td>'
+            + '<td>+' + f2(L.avgBounce) + '</td><td>+' + f2(L.medBounce) + '</td><td>-' + f2(L.avgBreakDepth) + '</td>'
+            + '<td class="' + (L.expectancy > 0 ? 'pos' : 'neg') + '">' + (L.expectancy > 0 ? '+' : '') + f2(L.expectancy) + '</td></tr>';
+        }).join('') + '</table>'
+      + '<div class="empty" style="margin-top:8px">expectancy = (hold% × เด้งเฉลี่ย) − (break% × ทะลุลึกเฉลี่ย) · จุดต่อการชนหนึ่งครั้ง (proxy ไม่รวม spread)</div>';
+  }
+
+  // w100 session bars
+  el('w100sess').innerHTML = bars(q.w100.bySession, ['ASIA','LONDON','NY']) || '<div class="empty">ยังไม่มีข้อมูล WMA100 ในช่วงนี้</div>';
+
+  // w100 splits
+  var sp = '';
+  sp += splitBlock('สภาพ stack', q.w100.byStack, ['aligned','scrambled']);
+  sp += splitBlock('ฝั่ง bias', q.w100.byBias, ['BUY bias','SELL bias']);
+  sp += splitBlock('เกรด confluence ขณะชน', q.w100.byGrade, ['A','B','C','D']);
+  el('w100split').innerHTML = sp || '<div class="empty">ยังไม่มีข้อมูล</div>';
+
+  // SAR
+  var sa = q.sar;
+  el('sarbox').innerHTML =
+      row3('ทุก regime', sa.all)
+    + row3('ขาขึ้น (dot ใต้ราคา)', sa.up)
+    + row3('ขาลง (dot เหนือราคา)', sa.down)
+    + '<div class="ptitle" style="margin-top:14px">win rate แยก session ที่ flip</div>'
+    + (bars(sa.bySession, ['ASIA','LONDON','NY'], 'winRate') || '<div class="empty">ยังไม่มีข้อมูล</div>');
+
+  // bias
+  el('biasbox').innerHTML = q.bias.n
+    ? '<table><tr><th>regimes</th><th>win rate</th><th>net เฉลี่ย/regime</th></tr><tr><td>' + q.bias.n + '</td>'
+      + '<td class="' + holdCls(q.bias.winRate || 0) + '">' + (q.bias.winRate == null ? '-' : q.bias.winRate + '%') + '</td>'
+      + '<td class="' + (q.bias.avgNet > 0 ? 'pos' : 'neg') + '">' + (q.bias.avgNet > 0 ? '+' : '') + f2(q.bias.avgNet) + '</td></tr></table>'
+      + '<div class="empty" style="margin-top:8px">1 regime = ช่วงที่ bias ค้างฝั่งเดิม · win = ราคาวิ่งตามฝั่ง bias จนถึง flip ถัดไป</div>'
+    : '<div class="empty">ยังไม่มี bias flip ในช่วงที่เลือก</div>';
+}
+
+function kpi(label, val){
+  return '<div class="kcard"><div class="kl">' + label + '</div><div class="kv">' + val + '</div></div>';
+}
+function bars(obj, order, field){
+  if (!obj) return '';
+  field = field || 'holdRate';
+  var keys = order.filter(function(k){ return obj[k]; });
+  if (!keys.length) return '';
+  return keys.map(function(k){
+    var v = obj[k][field] || 0;
+    return '<div class="bar"><span class="bl">' + k + '</span><span class="btrack"><span class="bfill" style="width:' + v + '%"></span></span><span class="bv ' + holdCls(v) + '">' + v + '% <span style="color:var(--dim)">(n=' + obj[k].n + ')</span></span></div>';
+  }).join('');
+}
+function splitBlock(title, obj, order){
+  var b = bars(obj, order);
+  if (!b) return '';
+  return '<div class="ptitle" style="margin-top:12px">' + title + '</div>' + b;
+}
+function row3(label, o){
+  if (!o || !o.n) return '<div class="bar"><span class="bl">' + label + '</span><span class="empty">ยังไม่มีข้อมูล</span></div>';
+  return '<div class="bar"><span class="bl">' + label + '</span>'
+    + '<span class="bv ' + holdCls(o.winRate || 0) + '" style="width:auto">' + (o.winRate == null ? '-' : o.winRate + '%') + '</span>'
+    + '<span class="empty" style="padding:0 0 0 10px">n=' + o.n + ' · เฉลี่ย ' + o.avgBars + ' แท่ง · net ' + (o.avgNet > 0 ? '+' : '') + f2(o.avgNet) + '</span></div>';
+}
+
+init();
+</script>
+</body>
+</html>
