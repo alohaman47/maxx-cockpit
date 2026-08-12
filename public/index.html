@@ -883,14 +883,14 @@ function renderCandles(d, dg){
 // ---- M5 trigger chart ----
 function renderM5(d, dg, bb){
   var svg = el('m5chart'), hint = el('m5hint'), chip = el('m5chip');
-  var ok = Array.isArray(d.m5bars) && d.m5bars.length > 5;
+  var ok = !!(d.m5 && Array.isArray(d.m5.bars) && d.m5.bars.length > 5);
   if (!ok){
     svg.style.display = 'none'; chip.style.display = 'none';
     hint.style.display = ''; hint.textContent = 'ต้องอัพ EA v0.70 บน VPS เพื่อเปิดกราฟ M5';
     return;
   }
   hint.style.display = 'none'; svg.style.display = 'block'; chip.style.display = 'inline-block';
-  var bars = d.m5bars.map(function(b){ return {ts:b[0], o:b[1], h:b[2], l:b[3], c:b[4]}; });
+  var bars = d.m5.bars.map(function(b){ return {ts:b[0], o:b[1], h:b[2], l:b[3], c:b[4]}; });
   var N = bars.length;
   var tol = d.zoneTol || 0, zl = d.lines && d.lines.WMA100;
   var W = 1000, H = 240, padL = 8, padR = 76, padT = 10, padB = 8;
