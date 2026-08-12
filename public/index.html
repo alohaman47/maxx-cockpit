@@ -70,6 +70,13 @@
   .pricebar{display:flex;align-items:center;gap:9px;margin:4px 0 10px;padding:10px 12px;border-radius:9px;background:linear-gradient(90deg,rgba(217,178,74,.15),transparent);border:1px solid var(--hair2);font-family:var(--mono);font-weight:700;font-size:14px;color:var(--gold2)}
   .pricebar::before{content:"";width:7px;height:7px;background:linear-gradient(135deg,#f0dfa6,#a87f2c);transform:rotate(45deg);flex-shrink:0}
 
+  .newschip{font-family:var(--mono);font-size:11px;color:var(--dim);border:1px solid var(--line);padding:5px 10px;border-radius:8px;display:none}
+  .newschip.hot{color:#ffb3c0;border-color:rgba(240,80,106,.55)}
+  .newslock{display:none;margin-bottom:14px;padding:12px 18px;border-radius:12px;border:1px solid rgba(240,80,106,.6);background:linear-gradient(90deg,rgba(240,80,106,.16),rgba(240,80,106,.03));color:#ff9fae;font-weight:700;letter-spacing:.05em;animation:pulse 1.8s infinite}
+  .h1cell{display:flex;flex-direction:column;justify-content:center;gap:2px;padding:12px 16px;border-left:1px solid var(--line);flex-shrink:0}
+  .h1cell .l1{font-size:10px;letter-spacing:.26em;color:#a79c80;font-weight:600}
+  .h1cell .l2{font-family:var(--mono);font-size:12px;font-weight:700}
+
   .pdrow{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
   .pdcell{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:8px 11px;font-family:var(--mono);font-size:11.5px}
   .pdcell .nm{font-weight:700;letter-spacing:.06em}
@@ -155,6 +162,7 @@
   <div class="symtabs" id="tabs"></div>
   <div class="tf">M15</div>
   <div class="spacer"></div>
+  <div class="newschip" id="newschip"></div>
   <button class="sndbtn" id="sndbtn">เสียงเตือน · OFF</button>
   <div class="conn"><span class="dot" id="conndot"></span> <span id="conntxt">MT5 BRIDGE</span></div>
   <div class="price" id="px">—<small id="pxsub">รอสัญญาณ</small></div>
@@ -167,8 +175,14 @@
     <div class="divline"><span class="lbl" id="divlbl"></span></div>
     <div class="zone hell">นรก · ใต้เส้น — มองเด้ง SELL<span class="me" id="meDn" style="color:var(--sell)"></span></div>
   </div>
+  <div class="h1cell" id="h1cell" style="display:none">
+    <div class="l1">H1 CONFIRM</div>
+    <div class="l2" id="h1txt"></div>
+  </div>
   <div class="biasverdict"><div class="v" id="biasv"></div><div class="d" id="biasd"></div></div>
 </div>
+
+<div class="newslock" id="newslock"></div>
 
 <div class="grid" id="grid" style="display:none">
   <div class="panel">
@@ -193,6 +207,7 @@
         <div>ระยะถึง WMA100<b id="m_dist"></b></div>
         <div>องค์ประกอบ<b id="m_comp"></b></div>
         <div>อัพเดตล่าสุด<b id="m_time"></b></div>
+        <div>Confluence<b id="m_conf"></b></div>
       </div>
     </div>
     <div class="panel">
@@ -205,6 +220,11 @@
       <div class="sesscards" id="sesscards"></div>
       <svg id="sesschart" viewBox="0 0 1000 240" style="width:100%;height:auto;display:block"></svg>
       <div id="sesshint" class="plan" style="display:none"></div>
+    </div>
+    <div class="panel">
+      <div class="ptitle">M15 Candles — แท่งเทียน + เส้น + โซน</div>
+      <svg id="candles" viewBox="0 0 1000 300" style="width:100%;height:auto;display:block"></svg>
+      <div id="candhint" class="plan" style="display:none"></div>
     </div>
   </div>
 
@@ -222,7 +242,7 @@
     <div class="panel">
       <div class="ptitle">Signal Feed</div>
       <div class="feed" id="feed"></div>
-      <div class="footer">MAXX COCKPIT v0.7 · live · กดออเดอร์จริงใน MT5</div>
+      <div class="footer">MAXX COCKPIT v0.8 · live · กดออเดอร์จริงใน MT5</div>
     </div>
   </div>
 </div>
@@ -319,7 +339,7 @@ es.onmessage = function(e){
   }
   S.symbols[m.sym] = { data: m.data, at: Date.now() };
   detect(m.sym, m.data);
-  if (!S.active) S.active = m.sym;
+  if (!S.active){ S.active = m.sym; loadNews(); }
   renderTabs();
   if (m.sym === S.active) render();
 };
@@ -332,7 +352,7 @@ function renderTabs(){
     return '<button class="symtab'+(s===S.active?' active':'')+'" onclick="setSym(\''+s+'\')">'+s+'</button>';
   }).join('');
 }
-function setSym(s){ S.active = s; renderTabs(); render(); renderChat(); }
+function setSym(s){ S.active = s; renderTabs(); render(); renderChat(); loadNews(); }
 
 // ---- stale watchdog ----
 setInterval(function(){
@@ -478,8 +498,25 @@ function render(){
   var sl = bb ? d.lines.WMA144 : d.lines.WMA144;
   el('plan').innerHTML = 'แผน: <b>'+side+'</b> ที่โซน WMA100 · SL แถว <b>'+fmt(sl,dg)+'</b> (WMA144) · TP = SAR trailing · <b>กดจริงใน MT5</b>';
 
+  // H1 confirm cell
+  var h1c = el('h1cell');
+  if (d.h1 && d.h1.wma50){
+    h1c.style.display = '';
+    var a50 = d.bid > d.h1.wma50, a100 = d.bid > d.h1.wma100;
+    var h1ok = bb ? (a50 && a100) : (!a50 && !a100);
+    el('h1txt').innerHTML = (h1ok ? '<span style="color:var(--buy)">ตรงทาง ✓</span>' : '<span style="color:var(--wait)">ยังไม่ตรง ✗</span>')
+      + '<br><span style="color:var(--dim);font-weight:400">' + (a50?'เหนือ':'ใต้') + ' W50 · ' + (a100?'เหนือ':'ใต้') + ' W100</span>';
+  } else h1c.style.display = 'none';
+
+  // confluence score
+  var conf = confluence(d), grade = conf >= 80 ? 'A' : conf >= 65 ? 'B' : conf >= 50 ? 'C' : 'D';
+  var mc = el('m_conf');
+  mc.textContent = conf + ' · ' + grade;
+  mc.style.color = conf >= 80 ? 'var(--buy)' : conf >= 65 ? 'var(--gold2)' : conf >= 50 ? 'var(--wait)' : 'var(--dim)';
+
   // session map
   renderSessions(d, dg);
+  renderCandles(d, dg);
 
   // feed
   el('feed').innerHTML = (S.feed[S.active]||[]).map(function(ev){
@@ -496,7 +533,7 @@ function renderSessions(d, dg){
   }
   hint.style.display = 'none'; svg.style.display = 'block';
   var hourFmt = S._hf || (S._hf = new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'numeric',hour12:false}));
-  var bars = d.bars;
+  var bars = d.bars.map(function(b){ return b.length >= 5 ? [b[0], b[2], b[3], b[4]] : b; });
   function sessOf(ts){
     var h = parseInt(hourFmt.format(new Date(ts*1000)),10) % 24;
     if (h >= 19 || h < 3) return 'ASIA';
@@ -609,6 +646,126 @@ async function aiAsk(){
   } catch(e){ h.push({role:'assistant', content:'AI ใช้ไม่ได้: ' + e.message}); }
   renderChat();
 }
+
+// ---- confluence score (same formula as server) ----
+function confluence(d){
+  var c = d.checks || {}, bb = d.h4 && d.h4.biasBuy;
+  var sc = 0;
+  if (c.stackOk) sc += 25;
+  if (c.emaOk) sc += 10;
+  if (c.sarOk) sc += 15;
+  var tol = d.zoneTol || 2, ad = Math.abs(c.dist100 || 999);
+  if (c.inZone100) sc += 20; else if (ad <= 2*tol) sc += 10; else if (ad <= 4*tol) sc += 5;
+  var evs = (d.events || []).filter(function(e){ return e.line === 'WMA100' && e.type !== 'testing'; });
+  if (evs.length) sc += Math.round(15 * evs.filter(function(e){ return e.type === 'bounce'; }).length / evs.length);
+  else sc += 7;
+  if (d.pd && d.pd.h && d.lines && d.lines.WMA100){
+    var near = bb ? Math.abs(d.lines.WMA100 - d.pd.l) : Math.abs(d.lines.WMA100 - d.pd.h);
+    if (near <= 3*tol) sc += 10;
+  }
+  if (S.news && S.news.lock) sc = Math.max(0, sc - 25);
+  return Math.min(100, sc);
+}
+
+// ---- M15 candle chart ----
+function renderCandles(d, dg){
+  var svg = el('candles'), hint = el('candhint');
+  var ok = d.bars && d.bars.length > 10 && d.bars[0].length >= 5;
+  if (!ok){
+    svg.style.display = 'none'; hint.style.display = '';
+    hint.textContent = 'แท่งเทียนต้องใช้ EA v0.5 — อัพเดตไฟล์ EA บน VPS แล้ว recompile';
+    return;
+  }
+  hint.style.display = 'none'; svg.style.display = 'block';
+  var N = Math.min(44, d.bars.length);
+  var off = d.bars.length - N;
+  var bars = d.bars.slice(off).map(function(b){ return {ts:b[0], o:b[1], h:b[2], l:b[3], c:b[4]}; });
+  var w50 = (d.ma && d.ma.w50) ? d.ma.w50.slice(off) : null;
+  var w100 = (d.ma && d.ma.w100) ? d.ma.w100.slice(off) : null;
+  var tol = d.zoneTol || 0;
+  var W = 1000, H = 300, padL = 8, padR = 76, padT = 12, padB = 10;
+  var hi = -1e18, lo = 1e18;
+  bars.forEach(function(b){ hi = Math.max(hi, b.h); lo = Math.min(lo, b.l); });
+  if (w100) w100.forEach(function(v){ if (v > 0){ hi = Math.max(hi, v + tol); lo = Math.min(lo, v - tol); } });
+  var span = (hi - lo) || 1; hi += span * .04; lo -= span * .04; span = hi - lo;
+  function X(i){ return padL + (W - padL - padR) * (i + .5) / N; }
+  function Y(v){ return padT + (H - padT - padB) * (1 - (v - lo) / span); }
+  var cw = Math.max(3, (W - padL - padR) / N * .62);
+  var out = '';
+  // WMA100 zone band
+  if (w100){
+    var top = '', bot = '';
+    for (var i = 0; i < N; i++){ if (w100[i] > 0){ top += X(i).toFixed(1) + ',' + Y(w100[i] + tol).toFixed(1) + ' '; } }
+    for (var i = N - 1; i >= 0; i--){ if (w100[i] > 0){ bot += X(i).toFixed(1) + ',' + Y(w100[i] - tol).toFixed(1) + ' '; } }
+    out += '<polygon points="' + top + bot + '" fill="rgba(245,197,66,.10)"/>';
+  }
+  // PDH/PDL
+  [[d.pd && d.pd.h, '#e08090', 'PDH'], [d.pd && d.pd.l, '#79d9a8', 'PDL']].forEach(function(pd){
+    if (pd[0] && pd[0] > lo && pd[0] < hi){
+      out += '<line x1="' + padL + '" y1="' + Y(pd[0]).toFixed(1) + '" x2="' + (W - padR) + '" y2="' + Y(pd[0]).toFixed(1) + '" stroke="' + pd[1] + '" stroke-dasharray="3,5" stroke-width="1"/>';
+      out += '<text x="' + (W - padR + 4) + '" y="' + (Y(pd[0]) + 3).toFixed(1) + '" font-size="9" fill="' + pd[1] + '" font-family="monospace">' + pd[2] + '</text>';
+    }
+  });
+  // candles
+  bars.forEach(function(b, i){
+    var up = b.c >= b.o, col = up ? 'var(--buy)' : 'var(--sell)';
+    var x = X(i);
+    out += '<line x1="' + x.toFixed(1) + '" y1="' + Y(b.h).toFixed(1) + '" x2="' + x.toFixed(1) + '" y2="' + Y(b.l).toFixed(1) + '" stroke="' + col + '" stroke-width="1"/>';
+    var yo = Y(Math.max(b.o, b.c)), hgt = Math.max(1, Math.abs(Y(b.o) - Y(b.c)));
+    out += '<rect x="' + (x - cw / 2).toFixed(1) + '" y="' + yo.toFixed(1) + '" width="' + cw.toFixed(1) + '" height="' + hgt.toFixed(1) + '" fill="' + col + '" ' + (up ? 'fill-opacity=".85"' : '') + '/>';
+  });
+  // MA lines
+  [[w50, 'var(--wma50)'], [w100, 'var(--wma100)']].forEach(function(ma){
+    if (!ma[0]) return;
+    var pts = '';
+    for (var i = 0; i < N; i++){ if (ma[0][i] > 0) pts += X(i).toFixed(1) + ',' + Y(ma[0][i]).toFixed(1) + ' '; }
+    out += '<polyline points="' + pts + '" fill="none" stroke="' + ma[1] + '" stroke-width="1.6"/>';
+  });
+  // last price
+  var lb = bars[N - 1];
+  out += '<text x="' + (W - padR + 4) + '" y="' + (Y(lb.c) + 3).toFixed(1) + '" font-size="11" fill="var(--gold2)" font-family="monospace" font-weight="bold">' + fmt(lb.c, dg) + '</text>';
+  svg.innerHTML = out;
+}
+
+// ---- economic news + NEWS LOCK ----
+S.news = { events: [], lock: false };
+async function loadNews(){
+  if (!S.active) return;
+  try {
+    var r = await fetch('/api/news?sym=' + encodeURIComponent(S.active));
+    var j = await r.json();
+    S.news.events = j.events || [];
+  } catch(e){}
+  updateNews();
+}
+function updateNews(){
+  var now = Date.now(), chip = el('newschip'), lockEl = el('newslock');
+  var highs = S.news.events.filter(function(e){ return e.impact === 'High'; });
+  var lockEv = null, next = null;
+  highs.forEach(function(e){
+    if (!lockEv && now >= e.t - 15*60000 && now <= e.t + 15*60000) lockEv = e;
+    if (e.t > now && (!next || e.t < next.t)) next = e;
+  });
+  if (next){
+    var m = Math.round((next.t - now) / 60000), hh = Math.floor(m / 60), mm = m % 60;
+    chip.style.display = '';
+    chip.textContent = next.ccy + ' ' + next.title + ' · อีก ' + (hh ? hh + ' ชม ' : '') + mm + ' น';
+    chip.className = 'newschip' + (m <= 60 ? ' hot' : '');
+  } else chip.style.display = 'none';
+  var lockNow = !!lockEv;
+  if (lockNow !== S.news.lock){
+    S.news.lock = lockNow;
+    if (S.active){
+      pushFeed(S.active, lockNow ? 's' : 'i',
+        lockNow ? ('NEWS LOCK เริ่ม — ' + lockEv.ccy + ' ' + lockEv.title + ' · งดกดช่วงข่าว') : 'NEWS LOCK จบ — กลับมาเทรดตามระบบได้');
+      render();
+    }
+  }
+  lockEl.style.display = lockNow ? 'block' : 'none';
+  if (lockNow) lockEl.textContent = 'NEWS LOCK — ' + lockEv.ccy + ' ' + lockEv.title + ' · งดกดออเดอร์ช่วงข่าว (±15 นาที) · confluence ถูกหัก 25 แต้ม';
+}
+setInterval(updateNews, 20000);
+setInterval(loadNews, 5 * 60000);
 </script>
 </body>
 </html>
