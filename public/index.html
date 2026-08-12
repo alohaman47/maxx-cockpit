@@ -994,12 +994,17 @@ function openNewsModal(){
       react = '<div style="font-family:var(--mono);font-size:11.5px;margin-top:3px">ทองตอบสนองจริง: <span style="color:' + c15 + ';font-weight:700">' + (r.p15 > 0 ? '+' : '') + r.p15 + ' จุด ใน 15น</span>'
         + (r.p30 != null ? ' · <span style="color:' + (r.p30 > 0 ? 'var(--buy)' : r.p30 < 0 ? 'var(--sell)' : 'var(--dim)') + '">' + (r.p30 > 0 ? '+' : '') + r.p30 + ' ใน 30น</span>' : '') + '</div>';
     }
+    var hist = '';
+    if (e.hist){
+      var h = e.hist;
+      hist = '<div style="font-family:var(--mono);font-size:11px;color:var(--gold2);margin-top:3px">สถิติที่ระบบเก็บเอง (' + h.n + ' ครั้ง): เหวี่ยงเฉลี่ย ' + h.avgAbs15 + ' จุดใน 15น · ขึ้น ' + h.upPct + '% · สุทธิเฉลี่ย ' + (h.avg15 > 0 ? '+' : '') + h.avg15 + '</div>';
+    }
     return '<div style="padding:10px 2px;border-bottom:1px solid rgba(36,41,56,.5)">'
       + '<div style="display:flex;gap:8px;align-items:baseline"><span style="width:8px;height:8px;border-radius:50%;background:' + impCol + ';flex-shrink:0;margin-top:4px"></span>'
       + '<div style="flex:1"><b>' + e.ccy + ' ' + e.title + '</b>' + verdict
       + '<div style="font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:2px">' + when + (nums.length ? ' · ' + nums.join(' · ') : '') + '</div>'
       + '<div style="font-size:11px;color:var(--dim);margin-top:2px">' + (e.rule || '') + '</div>'
-      + react + '</div></div></div>';
+      + hist + react + '</div></div></div>';
   }
   var past = evs.filter(function(e){ return e.t <= now; });
   var next = evs.filter(function(e){ return e.t > now; });
