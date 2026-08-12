@@ -193,7 +193,7 @@
   <div class="spacer"></div>
   <a class="sndbtn" href="/quant.html" style="text-decoration:none">QUANT LAB</a>
   <button class="sndbtn" id="sysbtn" onclick="openSys()">SYSTEM</button>
-  <div class="newschip" id="newschip"></div>
+  <div class="newschip" id="newschip" onclick="openNewsModal()" style="cursor:pointer" title="กดดูข่าวทั้งหมด + ผลต่อทอง"></div>
   <button class="sndbtn" id="sndbtn">เสียงเตือน · OFF</button>
   <div class="conn"><span class="dot" id="conndot"></span> <span id="conntxt">MT5 BRIDGE</span></div>
   <div class="price" id="px">—<small id="pxsub">รอสัญญาณ</small></div>
@@ -314,6 +314,14 @@
     <div class="sysgrid" id="sysgrid"></div>
     <div id="sysincidents"></div>
     <button class="sysclose" onclick="closeSys()">รับทราบ — ปิดรายงาน</button>
+  </div>
+</div>
+
+<div class="sysmodal" id="newsmodal">
+  <div class="sysbox">
+    <h2>NEWS DESK — ข่าว + ผลต่อทองคำ</h2>
+    <div id="newslist"></div>
+    <button class="sysclose" onclick="el('newsmodal').classList.remove('show')">ปิด</button>
   </div>
 </div>
 
@@ -964,6 +972,44 @@ function updateNews(){
   lockEl.style.display = lockNow ? 'block' : 'none';
   if (lockNow) lockEl.textContent = 'NEWS LOCK — ' + lockEv.ccy + ' ' + lockEv.title + ' · งดกดออเดอร์ช่วงข่าว (±15 นาที) · confluence ถูกหัก 25 แต้ม';
 }
+function openNewsModal(){
+  var evs = S.news.events || [], now = Date.now();
+  var dg = (S.symbols[S.active] && S.symbols[S.active].data.digits) || 2;
+  function row(e){
+    var past = e.t <= now;
+    var impCol = e.impact === 'High' ? 'var(--sell)' : 'var(--wait)';
+    var when = etTime(new Date(e.t)) + (past ? ' · ออกแล้ว' : ' · อีก ' + Math.round((e.t - now) / 60000) + ' น');
+    var nums = [];
+    if (e.actual) nums.push('จริง <b style="color:var(--text)">' + e.actual + '</b>');
+    if (e.forecast) nums.push('คาด ' + e.forecast);
+    if (e.previous) nums.push('ก่อนหน้า ' + e.previous);
+    var verdict = '';
+    if (e.verdict){
+      var vc = e.verdict === 'บวกทอง' ? 'var(--buy)' : e.verdict === 'ลบทอง' ? 'var(--sell)' : 'var(--wait)';
+      verdict = ' <span style="color:' + vc + ';font-weight:800">[' + e.verdict + ']</span>';
+    }
+    var react = '';
+    if (e.reaction){
+      var r = e.reaction, c15 = r.p15 > 0 ? 'var(--buy)' : r.p15 < 0 ? 'var(--sell)' : 'var(--dim)';
+      react = '<div style="font-family:var(--mono);font-size:11.5px;margin-top:3px">ทองตอบสนองจริง: <span style="color:' + c15 + ';font-weight:700">' + (r.p15 > 0 ? '+' : '') + r.p15 + ' จุด ใน 15น</span>'
+        + (r.p30 != null ? ' · <span style="color:' + (r.p30 > 0 ? 'var(--buy)' : r.p30 < 0 ? 'var(--sell)' : 'var(--dim)') + '">' + (r.p30 > 0 ? '+' : '') + r.p30 + ' ใน 30น</span>' : '') + '</div>';
+    }
+    return '<div style="padding:10px 2px;border-bottom:1px solid rgba(36,41,56,.5)">'
+      + '<div style="display:flex;gap:8px;align-items:baseline"><span style="width:8px;height:8px;border-radius:50%;background:' + impCol + ';flex-shrink:0;margin-top:4px"></span>'
+      + '<div style="flex:1"><b>' + e.ccy + ' ' + e.title + '</b>' + verdict
+      + '<div style="font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:2px">' + when + (nums.length ? ' · ' + nums.join(' · ') : '') + '</div>'
+      + '<div style="font-size:11px;color:var(--dim);margin-top:2px">' + (e.rule || '') + '</div>'
+      + react + '</div></div></div>';
+  }
+  var past = evs.filter(function(e){ return e.t <= now; });
+  var next = evs.filter(function(e){ return e.t > now; });
+  el('newslist').innerHTML =
+      (past.length ? '<div class="ptitle">ออกแล้ววันนี้</div>' + past.map(row).join('') : '')
+    + (next.length ? '<div class="ptitle" style="margin-top:14px">กำลังจะมา</div>' + next.map(row).join('') : '')
+    + (!evs.length ? '<div style="color:var(--dim);font-family:var(--mono);font-size:12px">ยังไม่มีข่าวในช่วง 12 ชม.ที่ผ่านมาถึง 72 ชม.ข้างหน้า</div>' : '');
+  el('newsmodal').classList.add('show');
+}
+
 setInterval(updateNews, 20000);
 setInterval(loadNews, 5 * 60000);
 
