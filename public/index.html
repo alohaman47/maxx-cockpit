@@ -130,6 +130,11 @@
   .panel.breach{border-color:rgba(240,80,106,.65);box-shadow:0 0 22px rgba(240,80,106,.18)}
   .cooldown{margin-top:10px;padding:10px 12px;border-radius:9px;background:rgba(240,80,106,.14);border:1px solid rgba(240,80,106,.55);color:#ff9fae;font-weight:700;font-size:12.5px;text-align:center;animation:pulse 1.8s infinite}
   .evt.tr{border-left-color:var(--gold2)}
+  .pbcall{display:inline-block;padding:2px 12px;border-radius:7px;font-family:var(--mono);font-weight:800;font-size:13px;margin-right:8px}
+  .pbhead{font-family:var(--mono);font-size:12.5px;color:var(--dim);margin-bottom:8px}
+  .pbfacts{font-size:12.5px;line-height:1.6;margin-bottom:10px}
+  .pbai{padding:10px 12px;border-radius:9px;background:var(--panel2);border-left:2px solid var(--gold);font-size:12.5px;line-height:1.6;white-space:pre-wrap;margin-bottom:10px}
+  .pbscore{font-family:var(--mono);font-size:11.5px;color:var(--dim);border-top:1px solid var(--line);padding-top:9px}
   .aibtn{width:100%;padding:12px;border-radius:10px;border:1px solid var(--hair2);background:linear-gradient(120deg,rgba(217,178,74,.16),rgba(217,178,74,.04));color:#ecd9a0;font-size:13px;font-weight:700;letter-spacing:.06em;cursor:pointer;font-family:var(--thai)}
   .aibtn:disabled{opacity:.5;cursor:wait}
   .aibtn.devil{margin-top:8px;border-color:rgba(240,80,106,.55);background:linear-gradient(120deg,rgba(240,80,106,.14),rgba(240,80,106,.03));color:#ff9fae}
@@ -250,6 +255,11 @@
       <svg id="candles" viewBox="0 0 1000 300" style="width:100%;height:auto;display:block"></svg>
       <div id="candhint" class="plan" style="display:none"></div>
     </div>
+    <div class="panel">
+      <div class="ptitle">Session Playbook — ระบบ vs AI ทายทิศ</div>
+      <div id="pbbox"><div class="plan">รอ session แรกปิด (03:00 / 08:00 / 17:00 ET) ระบบจะวิเคราะห์เอง หรือกดวิเคราะห์ทันที</div></div>
+      <button class="aibtn" id="pbrun" style="margin-top:10px">วิเคราะห์ session ที่เพิ่งจบตอนนี้</button>
+    </div>
   </div>
 
   <div class="colwrap">
@@ -277,7 +287,7 @@
     <div class="panel">
       <div class="ptitle">Signal Feed</div>
       <div class="feed" id="feed"></div>
-      <div class="footer">MAXX COCKPIT v1.0 · live · กดออเดอร์จริงใน MT5</div>
+      <div class="footer">MAXX COCKPIT v1.5 · live · กดออเดอร์จริงใน MT5</div>
     </div>
   </div>
 </div>
@@ -902,6 +912,56 @@ function openSys(){
 function closeSys(){ el('sysmodal').classList.remove('show'); }
 loadSys();
 setInterval(loadSys, 60000);
+
+// ---- session playbook ----
+function callChip(c){
+  if (!c) return '<span class="pbcall" style="background:var(--panel2);color:var(--dim)">-</span>';
+  var col = c === 'UP' ? 'var(--buy)' : c === 'DOWN' ? 'var(--sell)' : 'var(--wait)';
+  return '<span class="pbcall" style="background:' + col + '22;color:' + col + ';border:1px solid ' + col + '55">' + c + '</span>';
+}
+function factsThai(f, dg){
+  var out = [];
+  out.push('net ' + (f.net >= 0 ? '+' : '') + fmt(f.net, dg) + ' · ปิดที่ ' + Math.round(f.closePos * 100) + '% ของ range');
+  if (f.brokePDH) out.push('ปิดเหนือ PDH — ทำ new high เทียบเมื่อวาน');
+  if (f.brokePDL) out.push('ปิดใต้ PDL — ทำ new low เทียบเมื่อวาน');
+  if (f.rejPDH) out.push('ทดสอบ PDH แล้วไม่ผ่าน');
+  if (f.rejPDL) out.push('ทดสอบ PDL แล้วยืนได้');
+  if (f.brokePrevHi) out.push('ทะลุ high ของ session ก่อนหน้า');
+  if (f.brokePrevLo) out.push('หลุด low ของ session ก่อนหน้า');
+  return out.join(' · ');
+}
+async function loadPlaybook(){
+  if (!S.active) return;
+  var q;
+  try { q = await (await fetch('/api/playbook?sym=' + encodeURIComponent(S.active))).json(); } catch(e){ return; }
+  var box = el('pbbox');
+  if (!q.latest){ return; }
+  var p = q.latest, dg = (S.symbols[S.active] && S.symbols[S.active].data.digits) || 2;
+  var h = '<div class="pbhead">' + p.session + ' จบ → ทายทิศ ' + p.nextSession + '</div>'
+    + '<div style="margin-bottom:8px">ระบบ: ' + callChip(p.sysCall) + ' AI: ' + callChip(p.aiCall) + '</div>'
+    + '<div class="pbfacts">' + factsThai(p.facts, dg) + '</div>'
+    + (p.aiText ? '<div class="pbai">' + p.aiText.replace(/</g,'&lt;') + '</div>' : '');
+  if (q.lastGraded){
+    var lg = q.lastGraded, ok = lg.grade;
+    h += '<div class="pbhead">คำทายล่าสุดที่ตรวจแล้ว (' + lg.pred.session + ' ทาย ' + lg.pred.nextSession + '): ผลจริง <b style="color:var(--text)">' + ok.outcome + '</b>'
+      + ' — ระบบ' + (ok.sysWin ? '<span style="color:var(--buy)">ถูก ✓</span>' : '<span style="color:var(--sell)">ผิด ✗</span>')
+      + (ok.aiWin !== null ? ' · AI' + (ok.aiWin ? '<span style="color:var(--buy)">ถูก ✓</span>' : '<span style="color:var(--sell)">ผิด ✗</span>') : '') + '</div>';
+  }
+  h += '<div class="pbscore">สนามแข่งความแม่น (ตรวจแล้ว ' + q.score.n + ' คำทาย): ระบบ ' + (q.score.sysAcc == null ? '-' : q.score.sysAcc + '%') + ' · AI ' + (q.score.aiAcc == null ? '-' : q.score.aiAcc + '%') + '</div>';
+  box.innerHTML = h;
+}
+el('pbrun').onclick = async function(){
+  this.disabled = true; this.textContent = 'กำลังวิเคราะห์...';
+  try {
+    var r = await fetch('/api/playbook/run', { method:'POST', headers: pinHeaders(), body: JSON.stringify({ sym: S.active }) });
+    var j = await r.json();
+    if (!j.ok) alert(j.error || 'ทำไม่ได้');
+    await loadPlaybook();
+  } catch(e){}
+  this.disabled = false; this.textContent = 'วิเคราะห์ session ที่เพิ่งจบตอนนี้';
+};
+loadPlaybook();
+setInterval(loadPlaybook, 5 * 60000);
 </script>
 </body>
 </html>
