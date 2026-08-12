@@ -5,7 +5,7 @@
 //| Attach to an M15 chart of each symbol you want on the dashboard. |
 //+------------------------------------------------------------------+
 #property copyright "Maxx"
-#property version   "0.61"
+#property version   "0.62"
 #property strict
 
 input string InpURL         = "https://your-app.up.railway.app/api/snapshot"; // Server URL (/api/snapshot)
@@ -451,6 +451,7 @@ void OnTimer()
    json += ",\"digits\":" + IntegerToString(_Digits);
    json += ",\"bid\":" + Jd(bid);
    json += ",\"zoneTol\":" + Jd(InpZoneTol);
+   json += ",\"spread\":" + Jd((double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) * _Point);
    json += ",\"lines\":{";
    json += "\"WMA50\":" + Jd(w50) + ",\"WMA89\":" + Jd(w89);
    json += ",\"WMA100\":" + Jd(w100) + ",\"WMA144\":" + Jd(w144);
