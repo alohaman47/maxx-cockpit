@@ -661,11 +661,17 @@ async function runPlaybook(sym, sessName) {
         + (facts.rejPDH ? ', tested PDH and REJECTED' : '') + (facts.rejPDL ? ', tested PDL and HELD' : '');
       const text = await askKimi([
         { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: 'session เพิ่งปิด วิเคราะห์และทายทิศ session ถัดไป (' + nextSession + ')' + String.fromCharCode(10) + 'กติกาบังคับ: บรรทัดแรกต้องเป็นรูปแบบ "CALL: UP" หรือ "CALL: DOWN" หรือ "CALL: RANGE" เท่านั้น จากนั้นขึ้นบรรทัดใหม่เขียน 3-4 ประโยค: session ที่จบเกิดอะไรขึ้น (อ้างตัวเลขจริง) และแผนปฏิบัติสำหรับ ' + nextSession + ' ตามเทคนิค (bias + โซน WMA100)' + String.fromCharCode(10,10) + 'FACTS: ' + factsTxt + String.fromCharCode(10,10) + 'CONTEXT:' + String.fromCharCode(10) + snapshotContext(sym) }
+        { role: 'user', content: 'session เพิ่งปิด วิเคราะห์และทายทิศ session ถัดไป (' + nextSession + ')' + String.fromCharCode(10,10) + 'FACTS: ' + factsTxt + String.fromCharCode(10,10) + 'CONTEXT:' + String.fromCharCode(10) + snapshotContext(sym) + String.fromCharCode(10,10) + 'รูปแบบคำตอบบังคับเคร่งครัด: ตัวอักษรแรกสุดของคำตอบต้องเริ่มด้วย CALL: ตามด้วย UP หรือ DOWN หรือ RANGE คำเดียว (ทายทิศ ' + nextSession + ') เช่น "CALL: UP" แล้วค่อยขึ้นบรรทัดใหม่เขียนบทวิเคราะห์ 3-4 ประโยค: เกิดอะไรขึ้น + แผนสำหรับ ' + nextSession + ' ตามเทคนิค ห้ามเกิน 5 ประโยค ถ้าไม่มีบรรทัด CALL ถือว่าคำตอบใช้ไม่ได้' }
       ], 1200);
-      const mm = /CALL:\s*(UP|DOWN|RANGE)/i.exec(text || '');
+      let mm = /CALL[:\s-]*\b(UP|DOWN|RANGE)\b/i.exec(text || '');
+      if (!mm) mm = /^\s*\b(UP|DOWN|RANGE)\b/i.exec(text || '');
+      if (!mm) {
+        const head = (text || '').slice(0, 120);
+        if (/ขึ้น|บวก|ไปต่อ.{0,10}ขึ้น/.test(head)) mm = [null, 'UP'];
+        else if (/ลง|ลบ|อ่อนตัว/.test(head)) mm = [null, 'DOWN'];
+      }
       if (mm) aiCall = mm[1].toUpperCase();
-      aiText = (text || '').replace(/^.*CALL:.*$/im, '').trim().slice(0, 600);
+      aiText = (text || '').replace(/^.*CALL[:\s-]*(UP|DOWN|RANGE).*$/im, '').trim().slice(0, 900);
     } catch (e) { noteAiError(e.message); }
   }
   logAppend('predictions.jsonl', {
