@@ -132,6 +132,7 @@ function record(sym, prev, d) {
   try {
     const st = recState(sym);
     const now = Date.now();
+    const conf = confluenceOf(sym, d);
     // finalized line-touch events with market structure at record time
     for (const ev of (d.events || [])) {
       if (!ev.ts || ev.running || ev.type === 'testing') continue;
@@ -140,7 +141,7 @@ function record(sym, prev, d) {
       st.seen.add(key);
       if (st.seen.size > 1200) st.seen = new Set(Array.from(st.seen).slice(-600));
       logAppend('events.jsonl', { at: now, sym, key, ts: ev.ts, line: ev.line, type: ev.type, pts: ev.pts,
-        ctx: { biasBuy: !!(d.h4 && d.h4.biasBuy), sarUp: !!(d.sar && d.sar.up), stack: stackStr(d), bid: d.bid } });
+        ctx: { biasBuy: !!(d.h4 && d.h4.biasBuy), sarUp: !!(d.sar && d.sar.up), stack: stackStr(d), bid: d.bid, conf } });
     }
     // SAR regimes: from first dot to next flip -> was the first dot right?
     if (d.sar) {
@@ -440,6 +441,100 @@ app.get('/api/stream', (req, res) => {
   clients.add(res);
   const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch (e) {} }, 15000);
   req.on('close', () => { clearInterval(ping); clients.delete(res); });
+});
+
+// ---------- Quant Lab ----------
+function pctl(arr, p) {
+  if (!arr.length) return 0;
+  const a = [...arr].sort((x, y) => x - y);
+  return a[Math.min(a.length - 1, Math.floor(p * a.length))];
+}
+function quantSummary(sym, days) {
+  const cutoff = Date.now() - days * 86400000;
+  const evs = readTail('events.jsonl', 8000).filter(e => e.sym === sym && e.at >= cutoff);
+  const sar = readTail('sar.jsonl', 4000).filter(e => e.sym === sym && e.at >= cutoff);
+  const bias = readTail('bias.jsonl', 1000).filter(e => e.sym === sym && e.at >= cutoff);
+
+  const lines = {};
+  for (const e of evs) {
+    const L = lines[e.line] || (lines[e.line] = { bounces: [], breaks: [] });
+    if (e.type === 'bounce') L.bounces.push(e.pts || 0); else L.breaks.push(e.pts || 0);
+  }
+  const lineStats = {};
+  for (const nm of Object.keys(lines)) {
+    const L = lines[nm], nb = L.bounces.length, nx = L.breaks.length, n = nb + nx;
+    const avgB = nb ? L.bounces.reduce((a, b) => a + b, 0) / nb : 0;
+    const avgX = nx ? L.breaks.reduce((a, b) => a + b, 0) / nx : 0;
+    const hold = n ? nb / n : 0;
+    lineStats[nm] = {
+      n, bounces: nb, breaks: nx, holdRate: Math.round(hold * 100),
+      avgBounce: +avgB.toFixed(2), medBounce: +pctl(L.bounces, .5).toFixed(2),
+      avgBreakDepth: +avgX.toFixed(2),
+      expectancy: +(hold * avgB - (1 - hold) * avgX).toFixed(2)
+    };
+  }
+
+  const w = evs.filter(e => e.line === 'WMA100');
+  function split(arr, keyFn) {
+    const out = {};
+    for (const e of arr) {
+      const k = keyFn(e); if (k == null) continue;
+      const o = out[k] || (out[k] = { n: 0, b: 0 });
+      o.n++; if (e.type === 'bounce') o.b++;
+    }
+    for (const k of Object.keys(out)) out[k].holdRate = Math.round(100 * out[k].b / out[k].n);
+    return out;
+  }
+  const alignedFn = e => {
+    const st = (e.ctx && e.ctx.stack) || '';
+    const i1 = st.indexOf('WMA50'), i2 = st.indexOf('WMA89'), i3 = st.indexOf('WMA100'), i4 = st.indexOf('WMA144');
+    if (i1 < 0 || i2 < 0 || i3 < 0 || i4 < 0) return null;
+    const up = i1 < i2 && i2 < i3 && i3 < i4, dn = i1 > i2 && i2 > i3 && i3 > i4;
+    return (up || dn) ? 'aligned' : 'scrambled';
+  };
+  const w100 = {
+    n: w.length,
+    bySession: split(w, e => e.ts ? sessOf(e.ts) : null),
+    byStack: split(w, alignedFn),
+    byBias: split(w, e => e.ctx ? (e.ctx.biasBuy ? 'BUY bias' : 'SELL bias') : null),
+    byGrade: split(w, e => (e.ctx && typeof e.ctx.conf === 'number')
+      ? (e.ctx.conf >= 80 ? 'A' : e.ctx.conf >= 65 ? 'B' : e.ctx.conf >= 50 ? 'C' : 'D') : null)
+  };
+
+  const sarBy = a => ({
+    n: a.length,
+    winRate: a.length ? Math.round(100 * a.filter(e => e.win).length / a.length) : null,
+    avgBars: a.length ? Math.round(a.reduce((x, e) => x + (e.bars || 0), 0) / a.length) : 0,
+    avgNet: a.length ? +(a.reduce((x, e) => x + (e.net || 0), 0) / a.length).toFixed(2) : 0
+  });
+  const sarSess = {};
+  for (const e of sar) {
+    const k = sessOf(Math.floor(e.start / 1000));
+    const o = sarSess[k] || (sarSess[k] = { n: 0, w: 0 });
+    o.n++; if (e.win) o.w++;
+  }
+  for (const k of Object.keys(sarSess)) sarSess[k].winRate = Math.round(100 * sarSess[k].w / sarSess[k].n);
+
+  const stamps = [...evs, ...sar, ...bias].map(e => e.at);
+  const firstAt = stamps.length ? Math.min(...stamps) : Date.now();
+  return {
+    sym, days,
+    recordedDays: +((Date.now() - firstAt) / 86400000).toFixed(1),
+    totals: { events: evs.length, sarRegimes: sar.length, biasRegimes: bias.length },
+    lineStats, w100,
+    sar: { all: sarBy(sar), up: sarBy(sar.filter(e => e.up)), down: sarBy(sar.filter(e => !e.up)), bySession: sarSess },
+    bias: {
+      n: bias.length,
+      winRate: bias.length ? Math.round(100 * bias.filter(e => e.win).length / bias.length) : null,
+      avgNet: bias.length ? +(bias.reduce((a, e) => a + (e.net || 0), 0) / bias.length).toFixed(2) : 0
+    },
+    lowSample: evs.length < 30
+  };
+}
+app.get('/api/quant', (req, res) => {
+  const sym = req.query.sym || Object.keys(snapshots)[0] || 'XAUUSD';
+  const days = Math.min(180, Math.max(1, Number(req.query.days) || 30));
+  res.json(quantSummary(sym, days));
 });
 
 app.get('/api/news', (req, res) => {
