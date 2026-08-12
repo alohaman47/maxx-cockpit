@@ -382,16 +382,6 @@ function snapshotContext(sym) {
       if (!inZ) return 'M5 TRIGGER: waiting - price not in M15 WMA100 zone yet';
       return 'M5 TRIGGER: price IN M15 zone, last closed M5 candle is ' + (bull ? 'bullish' : 'bearish') + ' -> ' + ((bb2 ? bull : !bull) ? 'TRIGGER READY (M5 closed back in bias direction)' : 'no trigger yet (M5 still against bias)');
     })(),
-    (function(){
-      if (!Array.isArray(d.m5bars) || d.m5bars.length < 2) return 'M5 TRIGGER: not available (EA v0.70 needed)';
-      const b = d.m5bars[d.m5bars.length - 2]; // last CLOSED M5 candle
-      const bull = b[4] >= b[1];
-      const inZone = !!(d.checks && d.checks.inZone100);
-      const bb2 = d.h4 && d.h4.biasBuy;
-      let st2 = 'price not in M15 WMA100 zone - M5 trigger not armed';
-      if (inZone) st2 = (bb2 === bull) ? 'ARMED + last closed M5 candle agrees with bias (early entry signal)' : 'price in zone, waiting for M5 candle to close in bias direction';
-      return 'M5 TRIGGER: last closed M5 candle ' + (bull ? 'bullish' : 'bearish') + ' (o ' + b[1] + ' c ' + b[4] + ') - ' + st2;
-    })(),
     (d.h1 ? ('H1 CONFIRM: price ' + (d.bid > d.h1.wma50 ? 'above' : 'below') + ' H1 WMA50 (' + f(d.h1.wma50) + '), ' + (d.bid > d.h1.wma100 ? 'above' : 'below') + ' H1 WMA100 (' + f(d.h1.wma100) + ')') : 'H1 CONFIRM: not available (EA v0.5 needed)'),
     (d.acct ? ('RISK DESK: equity ' + d.acct.eq + ', today P/L ' + d.acct.dayPL + ', trades ' + d.acct.trades + '/' + d.acct.limTrades + ', loss streak ' + d.acct.streak + '/' + d.acct.limStreak + ', open positions ' + d.acct.openPos + ((d.acct.trades >= d.acct.limTrades || d.acct.streak >= d.acct.limStreak || d.acct.dayPL <= -(d.acct.bal * d.acct.limLossPct / 100)) ? ' - COOLDOWN ACTIVE, no more trades today per risk rules' : '')) : 'RISK DESK: not available (EA v0.6 needed)'),
     'CONFLUENCE SCORE: ' + confluenceOf(sym, d) + '/100' + (newsLockFor(sym) ? ' (NEWS LOCK active - no trading during news window)' : ''),
