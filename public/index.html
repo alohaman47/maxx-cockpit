@@ -141,6 +141,8 @@
   .devrow{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
   .devopt{flex:1;min-width:86px;padding:8px 6px;border-radius:8px;border:1px solid rgba(240,80,106,.4);background:transparent;color:#ff9fae;font-size:11.5px;font-weight:700;cursor:pointer;font-family:var(--thai)}
   .devopt:hover{background:rgba(240,80,106,.12)}
+  .tfbtn{padding:3px 12px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--dim);font-size:10.5px;font-weight:700;cursor:pointer;font-family:var(--mono);letter-spacing:.08em}
+  .tfbtn.active{color:#ecd9a0;border-color:var(--hair2);background:rgba(217,178,74,.1)}
   .aiout{margin-top:10px;padding:12px 13px;border-radius:10px;background:var(--panel2);border-left:2px solid var(--gold);font-size:13px;line-height:1.6;display:none;white-space:pre-wrap}
   .aichat{margin-top:12px;display:flex;flex-direction:column;gap:8px;max-height:260px;overflow:auto}
   .bub{padding:8px 11px;border-radius:10px;font-size:12.5px;line-height:1.5;max-width:92%;white-space:pre-wrap}
@@ -208,6 +210,10 @@
     <div class="l1">H1 CONFIRM</div>
     <div class="l2" id="h1txt"></div>
   </div>
+  <div class="h1cell" id="m5cell" style="display:none">
+    <div class="l1">M5 TRIGGER</div>
+    <div class="l2" id="m5txt"></div>
+  </div>
   <div class="biasverdict"><div class="v" id="biasv"></div><div class="d" id="biasd"></div></div>
 </div>
 
@@ -251,7 +257,12 @@
       <div id="sesshint" class="plan" style="display:none"></div>
     </div>
     <div class="panel">
-      <div class="ptitle">M15 Candles — แท่งเทียน + เส้น + โซน</div>
+      <div class="ptitle" style="display:flex;align-items:center;gap:10px">แท่งเทียน + เส้น + โซน
+        <span style="margin-left:auto;display:flex;gap:5px">
+          <button class="tfbtn active" id="tfm15" onclick="setTF('M15')">M15</button>
+          <button class="tfbtn" id="tfm5" onclick="setTF('M5')">M5</button>
+        </span>
+      </div>
       <svg id="candles" viewBox="0 0 1000 300" style="width:100%;height:auto;display:block"></svg>
       <div id="candhint" class="plan" style="display:none"></div>
     </div>
@@ -287,7 +298,7 @@
     <div class="panel">
       <div class="ptitle">Signal Feed</div>
       <div class="feed" id="feed"></div>
-      <div class="footer">MAXX COCKPIT v1.5 · live · กดออเดอร์จริงใน MT5</div>
+      <div class="footer">MAXX COCKPIT v1.7 · live · กดออเดอร์จริงใน MT5</div>
     </div>
   </div>
 </div>
@@ -593,6 +604,21 @@ function render(){
       + '<br><span style="color:var(--dim);font-weight:400">' + (a50?'เหนือ':'ใต้') + ' W50 · ' + (a100?'เหนือ':'ใต้') + ' W100</span>';
   } else h1c.style.display = 'none';
 
+  // M5 trigger cell
+  var m5c = el('m5cell');
+  if (d.m5 && d.m5.bars && d.m5.bars.length > 2){
+    m5c.style.display = '';
+    var lb5 = d.m5.bars[d.m5.bars.length - 2];
+    var bull5 = lb5[4] > lb5[1];
+    var inZ5 = !!(c.inZone100);
+    var trig = inZ5 && (bb ? bull5 : !bull5);
+    el('m5txt').innerHTML = !inZ5
+      ? '<span style="color:var(--dim)">รอเข้าโซน</span><br><span style="color:var(--dim);font-weight:400">M5 ' + (bull5 ? 'เขียว' : 'แดง') + '</span>'
+      : (trig
+        ? '<span style="color:var(--buy)">พร้อม ✓</span><br><span style="color:var(--dim);font-weight:400">M5 ปิดกลับทิศ bias</span>'
+        : '<span style="color:var(--wait)">ในโซน รอ M5</span><br><span style="color:var(--dim);font-weight:400">แท่งล่าสุดยังสวน</span>');
+  } else m5c.style.display = 'none';
+
   // confluence score
   var conf = confluence(d), grade = conf >= 80 ? 'A' : conf >= 65 ? 'B' : conf >= 50 ? 'C' : 'D';
   var mc = el('m_conf');
@@ -768,18 +794,27 @@ function confluence(d){
 // ---- M15 candle chart ----
 function renderCandles(d, dg){
   var svg = el('candles'), hint = el('candhint');
-  var ok = d.bars && d.bars.length > 10 && d.bars[0].length >= 5;
+  var useM5 = S.candleTF === 'M5';
+  if (useM5 && !(d.m5 && d.m5.bars && d.m5.bars.length > 10)){
+    svg.style.display = 'none'; hint.style.display = '';
+    hint.textContent = 'M5 ต้องใช้ EA v0.70 — อัพเดตไฟล์ EA บน VPS แล้ว recompile';
+    return;
+  }
+  var srcBars = useM5 ? d.m5.bars : d.bars;
+  var srcMa = useM5 ? d.m5.ma : d.ma;
+  var ok = srcBars && srcBars.length > 10 && srcBars[0].length >= 5;
   if (!ok){
     svg.style.display = 'none'; hint.style.display = '';
     hint.textContent = 'แท่งเทียนต้องใช้ EA v0.5 — อัพเดตไฟล์ EA บน VPS แล้ว recompile';
     return;
   }
   hint.style.display = 'none'; svg.style.display = 'block';
-  var N = Math.min(44, d.bars.length);
-  var off = d.bars.length - N;
-  var bars = d.bars.slice(off).map(function(b){ return {ts:b[0], o:b[1], h:b[2], l:b[3], c:b[4]}; });
-  var w50 = (d.ma && d.ma.w50) ? d.ma.w50.slice(off) : null;
-  var w100 = (d.ma && d.ma.w100) ? d.ma.w100.slice(off) : null;
+  var N = Math.min(useM5 ? 48 : 44, srcBars.length);
+  var off = srcBars.length - N;
+  var bars = srcBars.slice(off).map(function(b){ return {ts:b[0], o:b[1], h:b[2], l:b[3], c:b[4]}; });
+  var w50 = (srcMa && srcMa.w50) ? srcMa.w50.slice(off) : null;
+  var w100 = (srcMa && srcMa.w100) ? srcMa.w100.slice(off) : null;
+  var zoneCenter = useM5 ? (d.lines && d.lines.WMA100) : null;
   var tol = d.zoneTol || 0;
   var W = 1000, H = 300, padL = 8, padR = 76, padT = 12, padB = 10;
   var hi = -1e18, lo = 1e18;
@@ -790,8 +825,14 @@ function renderCandles(d, dg){
   function Y(v){ return padT + (H - padT - padB) * (1 - (v - lo) / span); }
   var cw = Math.max(3, (W - padL - padR) / N * .62);
   var out = '';
+  // on M5: flat band at the M15 WMA100 zone (the actionable zone)
+  if (useM5 && zoneCenter){
+    hi = Math.max(hi, zoneCenter + tol); lo = Math.min(lo, zoneCenter - tol);
+    span = (hi - lo) || 1; hi += span * .02; lo -= span * .02; span = hi - lo;
+    out += '<rect x="' + padL + '" y="' + Y(zoneCenter + tol).toFixed(1) + '" width="' + (W - padL - padR) + '" height="' + Math.max(1, (Y(zoneCenter - tol) - Y(zoneCenter + tol))).toFixed(1) + '" fill="rgba(245,197,66,.10)"/>';
+  }
   // WMA100 zone band
-  if (w100){
+  if (!useM5 && w100){
     var top = '', bot = '';
     for (var i = 0; i < N; i++){ if (w100[i] > 0){ top += X(i).toFixed(1) + ',' + Y(w100[i] + tol).toFixed(1) + ' '; } }
     for (var i = N - 1; i >= 0; i--){ if (w100[i] > 0){ bot += X(i).toFixed(1) + ',' + Y(w100[i] - tol).toFixed(1) + ' '; } }
@@ -827,6 +868,13 @@ function renderCandles(d, dg){
 
 // ---- economic news + NEWS LOCK ----
 S.news = { events: [], lock: false };
+S.candleTF = 'M15';
+function setTF(tf){
+  S.candleTF = tf;
+  el('tfm15').classList.toggle('active', tf === 'M15');
+  el('tfm5').classList.toggle('active', tf === 'M5');
+  if (S.active) render();
+}
 async function loadNews(){
   if (!S.active) return;
   try {
