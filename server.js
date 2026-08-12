@@ -165,6 +165,32 @@ function record(sym, prev, d) {
         st.biasFlip = { at: now, price: d.bid, buy: d.h4.biasBuy };
       }
     }
+    // account deals -> trade attribution log (real trades with setup context)
+    if (Array.isArray(d.deals) && d.deals.length) {
+      if (!st.dealSeen)
+        st.dealSeen = new Set(readTail('trades.jsonl', 800).map(t => t.id).filter(Boolean));
+      for (const dl of d.deals) {
+        if (!dl.id || st.dealSeen.has(dl.id)) continue;
+        st.dealSeen.add(dl.id);
+        const base = { at: now, id: dl.id, pos: dl.pos, sym: dl.symd || sym, dir: dl.dir,
+                       price: dl.price, lot: dl.lot, t: dl.t };
+        if (dl.e === 'in') {
+          logAppend('trades.jsonl', Object.assign(base, { kind: 'open', ctx: {
+            conf, grade: conf >= 80 ? 'A' : conf >= 65 ? 'B' : conf >= 50 ? 'C' : 'D',
+            biasBuy: !!(d.h4 && d.h4.biasBuy), session: sessOf(Math.floor(now / 1000)),
+            stackOk: !!(d.checks && d.checks.stackOk), sarOk: !!(d.checks && d.checks.sarOk),
+            inZone: !!(d.checks && d.checks.inZone100), bounce: !!(d.checks && d.checks.bounceConfirm)
+          } }));
+          broadcast({ type: 'trade', sym, at: now,
+            txt: 'เปิดไม้ ' + dl.dir.toUpperCase() + ' ' + dl.lot + ' ' + (dl.symd || sym) + ' @ ' + dl.price + ' (grade ' + (conf >= 80 ? 'A' : conf >= 65 ? 'B' : conf >= 50 ? 'C' : 'D') + ')', pl: 0 });
+        } else {
+          logAppend('trades.jsonl', Object.assign(base, { kind: 'close', pl: dl.pl }));
+          broadcast({ type: 'trade', sym, at: now,
+            txt: 'ปิดไม้ ' + (dl.symd || sym) + ' ' + (dl.pl >= 0 ? '+' : '') + dl.pl + ' USD', pl: dl.pl });
+        }
+      }
+    }
+
     // hourly market-structure snapshot
     const hour = Math.floor(now / 3600000);
     if (hour !== st.lastStructHour) {
@@ -278,6 +304,7 @@ function snapshotContext(sym) {
     'SESSIONS (ET):\n' + (sessionStats(d.bars) || 'no bar data (EA v0.3+ required)'),
     'LINE TOUCH HISTORY (broker server time, newest first):\n' + (evs || 'none'),
     (d.h1 ? ('H1 CONFIRM: price ' + (d.bid > d.h1.wma50 ? 'above' : 'below') + ' H1 WMA50 (' + f(d.h1.wma50) + '), ' + (d.bid > d.h1.wma100 ? 'above' : 'below') + ' H1 WMA100 (' + f(d.h1.wma100) + ')') : 'H1 CONFIRM: not available (EA v0.5 needed)'),
+    (d.acct ? ('RISK DESK: equity ' + d.acct.eq + ', today P/L ' + d.acct.dayPL + ', trades ' + d.acct.trades + '/' + d.acct.limTrades + ', loss streak ' + d.acct.streak + '/' + d.acct.limStreak + ', open positions ' + d.acct.openPos + ((d.acct.trades >= d.acct.limTrades || d.acct.streak >= d.acct.limStreak || d.acct.dayPL <= -(d.acct.bal * d.acct.limLossPct / 100)) ? ' - COOLDOWN ACTIVE, no more trades today per risk rules' : '')) : 'RISK DESK: not available (EA v0.6 needed)'),
     'CONFLUENCE SCORE: ' + confluenceOf(sym, d) + '/100' + (newsLockFor(sym) ? ' (NEWS LOCK active - no trading during news window)' : ''),
     'UPCOMING NEWS (' + Array.from(newsCcy(sym)).join('/') + '): ' + (newsFor(sym, 48).slice(0, 3).map(e => e.ccy + ' ' + e.title + ' [' + e.impact + '] in ' + Math.round((e.t - Date.now()) / 60000) + 'min').join(' | ') || 'none in 48h'),
     'RECORDED RESEARCH STATS (last 7 days, logged by this cockpit):\n' + statsText(sym, 7)
@@ -515,13 +542,49 @@ function quantSummary(sym, days) {
   }
   for (const k of Object.keys(sarSess)) sarSess[k].winRate = Math.round(100 * sarSess[k].w / sarSess[k].n);
 
+  // real trade attribution (from account deals)
+  const trRaw = readTail('trades.jsonl', 2000).filter(e => e.at >= cutoff && e.sym === sym);
+  const opens = {}, plByPos = {};
+  for (const e of trRaw) {
+    if (e.kind === 'open') opens[e.pos] = e;
+    else if (e.kind === 'close') plByPos[e.pos] = (plByPos[e.pos] || 0) + (e.pl || 0);
+  }
+  const closed = Object.keys(plByPos).map(pos => ({
+    pos, pl: +plByPos[pos].toFixed(2),
+    grade: opens[pos] && opens[pos].ctx ? opens[pos].ctx.grade : null,
+    session: opens[pos] && opens[pos].ctx ? opens[pos].ctx.session : null,
+    dir: opens[pos] ? opens[pos].dir : null
+  }));
+  const wins = closed.filter(t => t.pl > 0), losses = closed.filter(t => t.pl <= 0);
+  const gsum = a => a.reduce((x, t) => x + t.pl, 0);
+  function tradeSplit(keyFn) {
+    const out = {};
+    for (const t of closed) {
+      const k = keyFn(t); if (k == null) continue;
+      const o = out[k] || (out[k] = { n: 0, w: 0, pl: 0 });
+      o.n++; if (t.pl > 0) o.w++; o.pl = +(o.pl + t.pl).toFixed(2);
+    }
+    for (const k of Object.keys(out)) out[k].winRate = Math.round(100 * out[k].w / out[k].n);
+    return out;
+  }
+  const trades = {
+    n: closed.length,
+    winRate: closed.length ? Math.round(100 * wins.length / closed.length) : null,
+    avgWin: wins.length ? +(gsum(wins) / wins.length).toFixed(2) : 0,
+    avgLoss: losses.length ? +(gsum(losses) / losses.length).toFixed(2) : 0,
+    profitFactor: (losses.length && gsum(losses) !== 0) ? +Math.abs(gsum(wins) / gsum(losses)).toFixed(2) : null,
+    netPL: +gsum(closed).toFixed(2),
+    byGrade: tradeSplit(t => t.grade),
+    bySession: tradeSplit(t => t.session)
+  };
+
   const stamps = [...evs, ...sar, ...bias].map(e => e.at);
   const firstAt = stamps.length ? Math.min(...stamps) : Date.now();
   return {
     sym, days,
     recordedDays: +((Date.now() - firstAt) / 86400000).toFixed(1),
     totals: { events: evs.length, sarRegimes: sar.length, biasRegimes: bias.length },
-    lineStats, w100,
+    lineStats, w100, trades,
     sar: { all: sarBy(sar), up: sarBy(sar.filter(e => e.up)), down: sarBy(sar.filter(e => !e.up)), bySession: sarSess },
     bias: {
       n: bias.length,
