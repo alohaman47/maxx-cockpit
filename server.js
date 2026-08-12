@@ -124,6 +124,39 @@ function readTail(file, maxLines) {
   } catch (e) { return []; }
 }
 
+// ---------- resident engineer (SRE): incident log + watchdog ----------
+const SYS_START = Date.now();
+let lastAiErr = 0, newsStaleFlag = false;
+function logIncident(type, detail, extra) {
+  logAppend('health.jsonl', Object.assign({ at: Date.now(), type, detail }, extra || {}));
+}
+function noteAiError(msg) {
+  if (Date.now() - lastAiErr > 600000) {
+    lastAiErr = Date.now();
+    logIncident('ai_error', 'Kimi: ' + String(msg).slice(0, 140));
+  }
+}
+logIncident('server_restart', 'server started (deploy or restart)');
+
+const feedState = {}; // sym -> { down, since }
+setInterval(() => {
+  const now = Date.now();
+  for (const sym of Object.keys(snapshots)) {
+    const age = now - snapshots[sym].at;
+    const st = feedState[sym] || (feedState[sym] = { down: false, since: 0 });
+    if (!st.down && age > 120000) { st.down = true; st.since = snapshots[sym].at; }
+    else if (st.down && age < 30000) {
+      st.down = false;
+      logIncident('feed_gap', sym + ' feed ขาดช่วง (data มีรู)', {
+        sym, start: st.since, durMin: +(((now - st.since) / 60000).toFixed(1))
+      });
+    }
+  }
+  if (newsCache.at && now - newsCache.at > 3 * 3600000) {
+    if (!newsStaleFlag) { newsStaleFlag = true; logIncident('news_stale', 'ปฏิทินข่าวไม่อัพเดตเกิน 3 ชม.'); }
+  } else newsStaleFlag = false;
+}, 30000);
+
 const recSt = {}; // per-symbol recorder state
 function recState(sym) {
   if (!recSt[sym]) {
@@ -444,7 +477,7 @@ async function maybeAutoComment(sym, prev, d) {
         + '\n\nเขียนคำบรรยายเหตุการณ์นี้สำหรับ feed ยาว 1-2 ประโยคเท่านั้น' }
     ], 800);
     if (text) broadcast({ type: 'ai', sym, at: Date.now(), text });
-  } catch (e) { console.error('auto comment failed:', e.message); }
+  } catch (e) { console.error('auto comment failed:', e.message); noteAiError(e.message); }
 }
 
 // ---------- AI on-demand endpoints ----------
@@ -460,7 +493,7 @@ app.post('/api/ai/summary', async (req, res) => {
       { role: 'user', content: 'สรุปสถานการณ์ตอนนี้ 4-6 ประโยค: แต่ละ session ที่ผ่านมาเป็นยังไง ตอนนี้ราคาอยู่ตรงไหนเทียบกับเส้นและ bias ระบบอยู่สถานะไหน และต้องรออะไรต่อ\n\n' + ctx }
     ], 2000);
     res.json({ ok: true, text });
-  } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
+  } catch (e) { noteAiError(e.message); res.status(502).json({ ok: false, error: e.message }); }
 });
 
 app.post('/api/ai/devil', async (req, res) => {
@@ -485,7 +518,7 @@ app.post('/api/ai/devil', async (req, res) => {
       { role: 'user', content: 'เป้าหมายที่ต้องโจมตี: ' + desc + '\n\nหาเหตุผล 3 ข้อที่ชัดเจนที่สุดว่าทำไมไม้นี้อาจเสีย โดยทุกข้อต้องอ้างตัวเลขจริงจากข้อมูล เช่น ข่าวที่ใกล้เข้ามา ระยะห่างจากโซน สภาพ stack อายุ SAR สถิติที่บันทึกไว้ session และสถานะ Risk Desk แล้วปิดท้ายด้วยประโยคเดียว: ' + (target === 'open' ? 'ควรถือต่อหรือควรจัดการยังไงตามระบบ' : 'ต้องเห็นอะไรก่อนถึงจะสมควรกด') + '\n\n' + ctx }
     ], 2000);
     res.json({ ok: true, text });
-  } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
+  } catch (e) { noteAiError(e.message); res.status(502).json({ ok: false, error: e.message }); }
 });
 
 app.post('/api/ai/chat', async (req, res) => {
@@ -507,7 +540,7 @@ app.post('/api/ai/chat', async (req, res) => {
       ...hist
     ], 2000);
     res.json({ ok: true, text });
-  } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
+  } catch (e) { noteAiError(e.message); res.status(502).json({ ok: false, error: e.message }); }
 });
 
 app.get('/api/ai/status', (req, res) =>
@@ -664,6 +697,29 @@ function quantSummary(sym, days) {
     lowSample: evs.length < 30
   };
 }
+app.get('/api/system', (req, res) => {
+  const hours = Math.min(168, Math.max(1, Number(req.query.hours) || 24));
+  const cutoff = Date.now() - hours * 3600000;
+  const incidents = readTail('health.jsonl', 600).filter(e => e.at >= cutoff).sort((a, b) => b.at - a.at);
+  const feeds = {};
+  for (const sym of Object.keys(snapshots))
+    feeds[sym] = { ageSec: Math.round((Date.now() - snapshots[sym].at) / 1000) };
+  const files = {};
+  for (const f of ['events.jsonl', 'sar.jsonl', 'bias.jsonl', 'structure.jsonl', 'trades.jsonl', 'health.jsonl']) {
+    try { files[f] = +(fs.statSync(path.join(DATA_DIR, f)).size / 1024).toFixed(1); }
+    catch (e) { files[f] = 0; }
+  }
+  res.json({
+    incidents, feeds, files,
+    uptimeMin: Math.round((Date.now() - SYS_START) / 60000),
+    memMB: Math.round(process.memoryUsage().rss / 1048576),
+    newsAgeMin: newsCache.at ? Math.round((Date.now() - newsCache.at) / 60000) : null,
+    newsEvents: newsCache.events.length,
+    aiCallsHour: aiCalls.length,
+    persisted: !!process.env.DATA_DIR
+  });
+});
+
 app.get('/api/quant', (req, res) => {
   const sym = req.query.sym || Object.keys(snapshots)[0] || 'XAUUSD';
   const days = Math.min(180, Math.max(1, Number(req.query.days) || 30));
