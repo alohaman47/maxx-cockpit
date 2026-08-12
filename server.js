@@ -52,7 +52,8 @@ async function fetchNews() {
     newsCache = {
       at: Date.now(),
       events: (Array.isArray(j) ? j : []).map(e => ({
-        t: Date.parse(e.date), title: e.title, ccy: e.country, impact: e.impact
+        t: Date.parse(e.date), title: e.title, ccy: e.country, impact: e.impact,
+        forecast: e.forecast || null, previous: e.previous || null, actual: e.actual || null
       })).filter(e => !isNaN(e.t) && (e.impact === 'High' || e.impact === 'Medium'))
     };
     console.log('news calendar loaded:', newsCache.events.length, 'events');
@@ -394,7 +395,8 @@ function snapshotContext(sym) {
     (d.h1 ? ('H1 CONFIRM: price ' + (d.bid > d.h1.wma50 ? 'above' : 'below') + ' H1 WMA50 (' + f(d.h1.wma50) + '), ' + (d.bid > d.h1.wma100 ? 'above' : 'below') + ' H1 WMA100 (' + f(d.h1.wma100) + ')') : 'H1 CONFIRM: not available (EA v0.5 needed)'),
     (d.acct ? ('RISK DESK: equity ' + d.acct.eq + ', today P/L ' + d.acct.dayPL + ', trades ' + d.acct.trades + '/' + d.acct.limTrades + ', loss streak ' + d.acct.streak + '/' + d.acct.limStreak + ', open positions ' + d.acct.openPos + ((d.acct.trades >= d.acct.limTrades || d.acct.streak >= d.acct.limStreak || d.acct.dayPL <= -(d.acct.bal * d.acct.limLossPct / 100)) ? ' - COOLDOWN ACTIVE, no more trades today per risk rules' : '')) : 'RISK DESK: not available (EA v0.6 needed)'),
     'CONFLUENCE SCORE: ' + confluenceOf(sym, d) + '/100' + (newsLockFor(sym) ? ' (NEWS LOCK active - no trading during news window)' : ''),
-    'UPCOMING NEWS (' + Array.from(newsCcy(sym)).join('/') + '): ' + (newsFor(sym, 48).slice(0, 3).map(e => e.ccy + ' ' + e.title + ' [' + e.impact + '] in ' + Math.round((e.t - Date.now()) / 60000) + 'min').join(' | ') || 'none in 48h'),
+    'UPCOMING NEWS (' + Array.from(newsCcy(sym)).join('/') + '): ' + (newsFor(sym, 48).filter(e => e.t > Date.now()).slice(0, 3).map(e => e.ccy + ' ' + e.title + ' [' + e.impact + '] in ' + Math.round((e.t - Date.now()) / 60000) + 'min').join(' | ') || 'none in 48h'),
+    'RECENT NEWS REACTIONS (measured from price): ' + (newsCache.events.filter(e => newsCcy(sym).has(e.ccy) && e.impact === 'High' && e.t <= Date.now() && e.t > Date.now() - 12 * 3600000).map(e => { const r = newsReaction(sym, e.t); return e.title + (e.actual ? ' actual ' + e.actual + ' vs fc ' + (e.forecast || '?') : '') + (r ? ' -> gold ' + (r.p15 > 0 ? '+' : '') + r.p15 + ' in 15min' + (r.p30 != null ? ', ' + (r.p30 > 0 ? '+' : '') + r.p30 + ' in 30min' : '') : ''); }).join(' | ') || 'none'),
     'RECORDED RESEARCH STATS (last 7 days, logged by this cockpit):\n' + statsText(sym, 7)
   ].join('\n');
 }
@@ -997,9 +999,69 @@ app.get('/api/charter', (req, res) => {
   });
 });
 
+// how each event type relates to gold (via USD): 'inverse' = higher-than-forecast is gold-negative
+function goldBias(title) {
+  const t = (title || '').toLowerCase();
+  if (/rate decision|fomc|press conference|monetary policy|minutes|powell|speaks/.test(t)) return 'special';
+  if (/unemployment claims|jobless|unemployment rate/.test(t)) return 'direct';
+  return 'inverse'; // CPI, PPI, NFP, retail sales, GDP, PMI, sentiment, ADP, wages...
+}
+function parseNum(v) {
+  if (v == null || v === '') return null;
+  const m = /-?\d+(?:\.\d+)?/.exec(String(v).replace(/,/g, ''));
+  if (!m) return null;
+  let n = parseFloat(m[0]);
+  const suf = String(v).toUpperCase();
+  if (suf.includes('K')) n *= 1e3;
+  else if (suf.includes('M')) n *= 1e6;
+  else if (suf.includes('B')) n *= 1e9;
+  return n;
+}
+function newsVerdict(e) {
+  const bias = goldBias(e.title);
+  if (bias === 'special') return null;
+  const act = parseNum(e.actual), ref = parseNum(e.forecast) != null ? parseNum(e.forecast) : parseNum(e.previous);
+  if (act == null || ref == null) return null;
+  if (act === ref) return 'ตามคาด';
+  const higher = act > ref;
+  const goldPos = (bias === 'inverse') ? !higher : higher;
+  return goldPos ? 'บวกทอง' : 'ลบทอง';
+}
+function newsRule(e) {
+  const bias = goldBias(e.title);
+  if (bias === 'special') return 'ดูโทนแถลง — hawkish = ลบทอง · dovish = บวกทอง';
+  if (bias === 'direct') return 'ออกสูงกว่าคาด = บวกทอง · ต่ำกว่าคาด = ลบทอง';
+  return 'ออกสูงกว่าคาด = ลบทอง · ต่ำกว่าคาด = บวกทอง';
+}
+// measured gold reaction from our own bars: pts at +15m and +30m after release
+function newsReaction(sym, t) {
+  const rec = snapshots[sym];
+  if (!rec || !rec.data.bars) return null;
+  const bars = normBars(rec.data);
+  const ts = Math.floor(t / 1000);
+  let idx = -1;
+  for (let i = 0; i < bars.length; i++) if (bars[i].t <= ts && ts < bars[i].t + 900) { idx = i; break; }
+  if (idx < 0) return null;
+  const pre = idx > 0 ? bars[idx - 1].c : bars[idx].o;
+  const p15 = +(bars[idx].c - pre).toFixed(2);
+  const p30 = bars[idx + 1] ? +(bars[idx + 1].c - pre).toFixed(2) : null;
+  return { p15, p30 };
+}
 app.get('/api/news', (req, res) => {
   const sym = req.query.sym || Object.keys(snapshots)[0] || 'XAUUSD';
-  res.json({ at: newsCache.at, events: newsFor(sym, 72) });
+  const now = Date.now(), ccy = newsCcy(sym);
+  const events = newsCache.events
+    .filter(e => ccy.has(e.ccy) && e.t > now - 12 * 3600000 && e.t < now + 72 * 3600000)
+    .sort((a, b) => a.t - b.t)
+    .map(e => {
+      const past = e.t <= now;
+      return Object.assign({}, e, {
+        rule: newsRule(e),
+        verdict: newsVerdict(e),
+        reaction: (past && e.impact === 'High') ? newsReaction(sym, e.t) : null
+      });
+    });
+  res.json({ at: newsCache.at, events });
 });
 
 app.get('/api/stats', (req, res) => {
