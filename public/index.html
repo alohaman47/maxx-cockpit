@@ -132,6 +132,7 @@
   .evt.tr{border-left-color:var(--gold2)}
   .aibtn{width:100%;padding:12px;border-radius:10px;border:1px solid var(--hair2);background:linear-gradient(120deg,rgba(217,178,74,.16),rgba(217,178,74,.04));color:#ecd9a0;font-size:13px;font-weight:700;letter-spacing:.06em;cursor:pointer;font-family:var(--thai)}
   .aibtn:disabled{opacity:.5;cursor:wait}
+  .aibtn.devil{margin-top:8px;border-color:rgba(240,80,106,.55);background:linear-gradient(120deg,rgba(240,80,106,.14),rgba(240,80,106,.03));color:#ff9fae}
   .aiout{margin-top:10px;padding:12px 13px;border-radius:10px;background:var(--panel2);border-left:2px solid var(--gold);font-size:13px;line-height:1.6;display:none;white-space:pre-wrap}
   .aichat{margin-top:12px;display:flex;flex-direction:column;gap:8px;max-height:260px;overflow:auto}
   .bub{padding:8px 11px;border-radius:10px;font-size:12.5px;line-height:1.5;max-width:92%;white-space:pre-wrap}
@@ -242,6 +243,7 @@
     <div class="panel">
       <div class="ptitle">AI Analyst — Kimi</div>
       <button class="aibtn" id="aisum">สรุปสถานการณ์ตอนนี้</button>
+      <button class="aibtn devil" id="aidevil">DEVIL'S ADVOCATE — โจมตีไม้นี้</button>
       <div class="aiout" id="aiout"></div>
       <div class="aichat" id="aichat"></div>
       <div class="airow">
@@ -660,12 +662,21 @@ async function aiPost(url, body){
 async function aiSummary(){
   var btn = el('aisum'), out = el('aiout');
   btn.disabled = true; btn.textContent = 'กำลังวิเคราะห์...';
-  out.style.display = 'block'; out.textContent = '...';
+  out.style.display = 'block'; out.style.borderLeftColor = 'var(--gold)'; out.textContent = '...';
   try { out.textContent = await aiPost('/api/ai/summary', {sym: S.active}); }
   catch(e){ out.textContent = 'AI ใช้ไม่ได้: ' + e.message; }
   btn.disabled = false; btn.textContent = 'สรุปสถานการณ์ตอนนี้';
 }
 el('aisum').onclick = aiSummary;
+async function aiDevil(){
+  var btn = el('aidevil'), out = el('aiout');
+  btn.disabled = true; btn.textContent = 'กำลังหาจุดตาย...';
+  out.style.display = 'block'; out.style.borderLeftColor = 'var(--sell)'; out.textContent = '...';
+  try { out.textContent = await aiPost('/api/ai/devil', {sym: S.active}); }
+  catch(e){ out.textContent = 'AI ใช้ไม่ได้: ' + e.message; }
+  btn.disabled = false; btn.textContent = "DEVIL'S ADVOCATE — โจมตีไม้นี้";
+}
+el('aidevil').onclick = aiDevil;
 function renderChat(){
   var box = el('aichat'), h = S.aichat[S.active] || [];
   box.innerHTML = h.map(function(m){
