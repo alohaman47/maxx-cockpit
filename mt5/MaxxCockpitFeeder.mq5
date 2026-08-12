@@ -264,27 +264,6 @@ string BuildBars()
   }
 
 //+------------------------------------------------------------------+
-// Last 48 M5 bars (4 hours) for the trigger-timeframe chart
-string BuildM5()
-  {
-   MqlRates r[];
-   ArraySetAsSeries(r, false);
-   int n = CopyRates(_Symbol, PERIOD_M5, 0, 48, r);
-   if(n < 2) return("[]");
-   long off = (long)TimeGMT() - (long)TimeCurrent();
-   string out = "[";
-   for(int i = 0; i < n; i++)
-     {
-      if(i > 0) out += ",";
-      out += "[" + IntegerToString((long)r[i].time + off);
-      out += "," + Jd(r[i].open) + "," + Jd(r[i].high);
-      out += "," + Jd(r[i].low) + "," + Jd(r[i].close) + "]";
-     }
-   out += "]";
-   return(out);
-  }
-
-//+------------------------------------------------------------------+
 // WMA50/WMA100 values for the last 96 M15 bars (oldest -> newest),
 // aligned with BuildBars output, for the dashboard candle chart.
 string BuildMa()
@@ -396,14 +375,28 @@ string BuildDeals()
   }
 
 //+------------------------------------------------------------------+
-// M5 trigger layer: last 60 M5 bars + M5 WMA50/100 arrays (oldest -> newest)
+// M5 trigger layer: 48 bars + M5 WMA50/100 + confirm-candle flags
+// at the M15 WMA100 zone (the technique entry zone).
 string BuildM5()
   {
-   int n = 60;
+   int n = 48;
    MqlRates r[];
    ArraySetAsSeries(r, true);
    if(CopyRates(_Symbol, PERIOD_M5, 0, n, r) < n) return("null");
+   double a50[], a100[];
+   ArraySetAsSeries(a50, true); ArraySetAsSeries(a100, true);
+   bool haveMa = (CopyBuffer(hM5W50, 0, 0, n, a50) >= n && CopyBuffer(hM5W100, 0, 0, n, a100) >= n);
    long off = (long)TimeGMT() - (long)TimeCurrent();
+
+   double w100 = BufVal(hW100, 0);
+   double zHi = w100 + InpZoneTol, zLo = w100 - InpZoneTol;
+   bool trigBuy = false, trigSell = false;
+   if(w100 > 0)
+     {
+      trigBuy  = (r[1].low  <= zHi) && (r[1].close > r[1].open) && (r[1].close > w100);
+      trigSell = (r[1].high >= zLo) && (r[1].close < r[1].open) && (r[1].close < w100);
+     }
+
    string bars = "[";
    for(int i = n - 1; i >= 0; i--)
      {
@@ -413,17 +406,26 @@ string BuildM5()
       bars += "," + Jd(r[i].low) + "," + Jd(r[i].close) + "]";
      }
    bars += "]";
-   double a50[], a100[];
-   ArraySetAsSeries(a50, true); ArraySetAsSeries(a100, true);
-   if(CopyBuffer(hM5W50, 0, 0, n, a50) < n)   return("null");
-   if(CopyBuffer(hM5W100, 0, 0, n, a100) < n) return("null");
-   string s50 = "[", s100 = "[";
-   for(int i = n - 1; i >= 0; i--)
+
+   string ma = "null";
+   if(haveMa)
      {
-      if(i < n - 1) { s50 += ","; s100 += ","; }
-      s50 += Jd(a50[i]); s100 += Jd(a100[i]);
+      string s50 = "[", s100 = "[";
+      for(int i = n - 1; i >= 0; i--)
+        {
+         if(i < n - 1) { s50 += ","; s100 += ","; }
+         s50 += Jd(a50[i]); s100 += Jd(a100[i]);
+        }
+      ma = "{\"w50\":" + s50 + "],\"w100\":" + s100 + "]}";
      }
-   return("{\"bars\":" + bars + ",\"ma\":{\"w50\":" + s50 + "],\"w100\":" + s100 + "]}}");
+
+   string out = "{";
+   out += "\"trigBuy\":" + (trigBuy ? "true" : "false");
+   out += ",\"trigSell\":" + (trigSell ? "true" : "false");
+   out += ",\"bars\":" + bars;
+   out += ",\"ma\":" + ma;
+   out += "}";
+   return(out);
   }
 
 //+------------------------------------------------------------------+
@@ -530,7 +532,6 @@ void OnTimer()
    json += ",\"acct\":" + BuildAcct();
    json += ",\"deals\":" + BuildDeals();
    json += ",\"pos\":" + BuildPos();
-   json += ",\"m5bars\":" + BuildM5();
    json += ",\"m5\":" + BuildM5();
    json += ",\"events\":" + g_events;
    json += "}";
