@@ -748,7 +748,7 @@ function updateNews(){
   });
   if (next){
     var m = Math.round((next.t - now) / 60000), hh = Math.floor(m / 60), mm = m % 60;
-    chip.style.display = '';
+    chip.style.display = 'inline-block';
     chip.textContent = next.ccy + ' ' + next.title + ' · อีก ' + (hh ? hh + ' ชม ' : '') + mm + ' น';
     chip.className = 'newschip' + (m <= 60 ? ' hot' : '');
   } else chip.style.display = 'none';
