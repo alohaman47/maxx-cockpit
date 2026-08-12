@@ -396,6 +396,14 @@ function snapshotContext(sym) {
     (d.acct ? ('RISK DESK: equity ' + d.acct.eq + ', today P/L ' + d.acct.dayPL + ', trades ' + d.acct.trades + '/' + d.acct.limTrades + ', loss streak ' + d.acct.streak + '/' + d.acct.limStreak + ', open positions ' + d.acct.openPos + ((d.acct.trades >= d.acct.limTrades || d.acct.streak >= d.acct.limStreak || d.acct.dayPL <= -(d.acct.bal * d.acct.limLossPct / 100)) ? ' - COOLDOWN ACTIVE, no more trades today per risk rules' : '')) : 'RISK DESK: not available (EA v0.6 needed)'),
     'CONFLUENCE SCORE: ' + confluenceOf(sym, d) + '/100' + (newsLockFor(sym) ? ' (NEWS LOCK active - no trading during news window)' : ''),
     'UPCOMING NEWS (' + Array.from(newsCcy(sym)).join('/') + '): ' + (newsFor(sym, 48).filter(e => e.t > Date.now()).slice(0, 3).map(e => e.ccy + ' ' + e.title + ' [' + e.impact + '] in ' + Math.round((e.t - Date.now()) / 60000) + 'min').join(' | ') || 'none in 48h'),
+    (function () {
+      const up = newsFor(sym, 48).filter(e => e.t > Date.now() && e.impact === 'High')[0];
+      if (!up) return 'NEWS REACTION HISTORY: no upcoming high-impact event in 48h';
+      const h = newsHistFor(sym, up.title, up.ccy);
+      return 'NEWS REACTION HISTORY for next event (' + up.title + '): ' + (h
+        ? h.n + ' past releases recorded by this system - avg move ' + (h.avg15 > 0 ? '+' : '') + h.avg15 + ' pts in 15min (avg magnitude ' + h.avgAbs15 + '), up ' + h.upPct + '% of the time' + (h.avg30 != null ? ', avg ' + (h.avg30 > 0 ? '+' : '') + h.avg30 + ' in 30min' : '')
+        : 'none recorded yet (history builds from today)');
+    })(),
     'RECENT NEWS REACTIONS (measured from price): ' + (newsCache.events.filter(e => newsCcy(sym).has(e.ccy) && e.impact === 'High' && e.t <= Date.now() && e.t > Date.now() - 12 * 3600000).map(e => { const r = newsReaction(sym, e.t); return e.title + (e.actual ? ' actual ' + e.actual + ' vs fc ' + (e.forecast || '?') : '') + (r ? ' -> gold ' + (r.p15 > 0 ? '+' : '') + r.p15 + ' in 15min' + (r.p30 != null ? ', ' + (r.p30 > 0 ? '+' : '') + r.p30 + ' in 30min' : '') : ''); }).join(' | ') || 'none'),
     'RECORDED RESEARCH STATS (last 7 days, logged by this cockpit):\n' + statsText(sym, 7)
   ].join('\n');
@@ -1047,6 +1055,49 @@ function newsReaction(sym, t) {
   const p30 = bars[idx + 1] ? +(bars[idx + 1].c - pre).toFixed(2) : null;
   return { p15, p30 };
 }
+// persistent per-event-type reaction history (book #8: news.jsonl)
+function newsHistFor(sym, title, ccy) {
+  const rows = readTail('news.jsonl', 1500).filter(e =>
+    e.sym === sym && e.title === title && e.ccy === ccy && typeof e.p15 === 'number');
+  if (!rows.length) return null;
+  const n = rows.length;
+  const avg15 = +(rows.reduce((a, e) => a + e.p15, 0) / n).toFixed(2);
+  const w30 = rows.filter(e => typeof e.p30 === 'number');
+  const avg30 = w30.length ? +(w30.reduce((a, e) => a + e.p30, 0) / w30.length).toFixed(2) : null;
+  return {
+    n, avg15, avg30,
+    upPct: Math.round(100 * rows.filter(e => e.p15 > 0).length / n),
+    avgAbs15: +(rows.reduce((a, e) => a + Math.abs(e.p15), 0) / n).toFixed(2)
+  };
+}
+let newsLogSeen = null;
+setInterval(() => {
+  const now = Date.now();
+  if (!newsCache.events.length) return;
+  if (!newsLogSeen)
+    newsLogSeen = new Set(readTail('news.jsonl', 1500).map(e => e.sym + '|' + e.t + '|' + e.title));
+  for (const sym of Object.keys(snapshots)) {
+    if (now - snapshots[sym].at > 120000) continue;
+    const ccy = newsCcy(sym);
+    for (const e of newsCache.events) {
+      if (e.impact !== 'High' || !ccy.has(e.ccy)) continue;
+      if (now < e.t + 35 * 60000 || now > e.t + 3 * 3600000) continue;
+      const key = sym + '|' + e.t + '|' + e.title;
+      if (newsLogSeen.has(key)) continue;
+      const r = newsReaction(sym, e.t);
+      if (!r || r.p30 == null) continue;
+      newsLogSeen.add(key);
+      logAppend('news.jsonl', {
+        at: now, sym, t: e.t, title: e.title, ccy: e.ccy, impact: e.impact,
+        forecast: e.forecast, previous: e.previous, actual: e.actual,
+        verdict: newsVerdict(e), p15: r.p15, p30: r.p30
+      });
+      broadcast({ type: 'ai', sym, at: now,
+        text: 'NEWS DESK บันทึกผลถาวร: ' + e.ccy + ' ' + e.title + ' -> ทอง ' + (r.p15 > 0 ? '+' : '') + r.p15 + ' จุดใน 15น / ' + (r.p30 > 0 ? '+' : '') + r.p30 + ' ใน 30น' });
+    }
+  }
+}, 5 * 60000);
+
 app.get('/api/news', (req, res) => {
   const sym = req.query.sym || Object.keys(snapshots)[0] || 'XAUUSD';
   const now = Date.now(), ccy = newsCcy(sym);
@@ -1058,7 +1109,8 @@ app.get('/api/news', (req, res) => {
       return Object.assign({}, e, {
         rule: newsRule(e),
         verdict: newsVerdict(e),
-        reaction: (past && e.impact === 'High') ? newsReaction(sym, e.t) : null
+        reaction: (past && e.impact === 'High') ? newsReaction(sym, e.t) : null,
+        hist: (e.impact === 'High') ? newsHistFor(sym, e.title, e.ccy) : null
       });
     });
   res.json({ at: newsCache.at, events });
