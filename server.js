@@ -301,6 +301,7 @@ function snapshotContext(sym) {
       + ' inZoneWMA100=' + !!c.inZone100 + ' bounceConfirm=' + !!c.bounceConfirm
       + ' distToWMA100=' + f(c.dist100) + ' zoneTol=' + f(d.zoneTol),
     'SYSTEM STATE: ' + state,
+    (d.pos ? ('OPEN POSITIONS: ' + (d.pos.length ? d.pos.map(pp => pp.dir.toUpperCase() + ' ' + pp.lot + ' ' + pp.symp + ' @ ' + pp.entry + ' (floating P/L ' + pp.pl + ')').join(' | ') : 'none')) : 'OPEN POSITIONS: unknown (EA v0.61 needed)'),
     'SESSIONS (ET):\n' + (sessionStats(d.bars) || 'no bar data (EA v0.3+ required)'),
     'LINE TOUCH HISTORY (broker server time, newest first):\n' + (evs || 'none'),
     (d.h1 ? ('H1 CONFIRM: price ' + (d.bid > d.h1.wma50 ? 'above' : 'below') + ' H1 WMA50 (' + f(d.h1.wma50) + '), ' + (d.bid > d.h1.wma100 ? 'above' : 'below') + ' H1 WMA100 (' + f(d.h1.wma100) + ')') : 'H1 CONFIRM: not available (EA v0.5 needed)'),
@@ -432,12 +433,22 @@ app.post('/api/ai/devil', async (req, res) => {
   if (!pinOk(req)) return res.status(401).json({ ok: false, error: 'bad pin' });
   if (!aiRateOk()) return res.status(429).json({ ok: false, error: 'AI rate limit reached - try again later' });
   const sym = (req.body && req.body.sym) || Object.keys(snapshots)[0];
+  const target = (req.body && req.body.target) || 'system';
+  const snap = snapshots[sym] && snapshots[sym].data;
   const ctx = snapshotContext(sym);
-  if (!ctx) return res.status(400).json({ ok: false, error: 'no live data for ' + sym });
+  if (!ctx || !snap) return res.status(400).json({ ok: false, error: 'no live data for ' + sym });
+  let desc;
+  if (target === 'buy') desc = 'ไม้สมมติ: BUY ' + sym + ' ที่ราคาตลาดตอนนี้ทันที โดยไม่รอย่อถึงโซน WMA100';
+  else if (target === 'sell') desc = 'ไม้สมมติ: SELL ' + sym + ' ที่ราคาตลาดตอนนี้ทันที (ถ้าสวนทิศ bias ให้ชี้ให้ชัดว่าผิดกติการะบบข้อไหน)';
+  else if (target === 'open') {
+    if (!snap.pos) return res.status(400).json({ ok: false, error: 'ต้องอัพ EA v0.61 เพื่อส่งรายละเอียดไม้ที่เปิดอยู่' });
+    if (!snap.pos.length) return res.status(400).json({ ok: false, error: 'ไม่มีไม้เปิดค้างอยู่ตอนนี้' });
+    desc = 'ไม้ที่เปิดค้างอยู่จริงตอนนี้ (ดูบรรทัด OPEN POSITIONS ในข้อมูล) — โจมตีความเสี่ยงของการถือต่อ';
+  } else desc = 'ไม้มาตรฐานตามระบบ: ' + ((snap.h4 && snap.h4.biasBuy) ? 'BUY' : 'SELL') + ' ที่โซน WMA100 ตามเทคนิค';
   try {
     const text = await askKimi([
-      { role: 'system', content: SYSTEM_PROMPT + '\n\nโหมดพิเศษ: ตอนนี้คุณสวมบท DEVIL\'S ADVOCATE ของ Risk Desk — หน้าที่คือพยายามฆ่าไอเดียเทรดปัจจุบัน ห้ามอวย ห้ามหาข้อดี ห้ามปลอบ' },
-      { role: 'user', content: 'โจมตี setup ปัจจุบันแบบตรงไปตรงมา: หาเหตุผล 3 ข้อที่ชัดเจนที่สุดว่าทำไมการเข้าไม้ตอนนี้ (หรือไม้ที่กำลังจะเกิด) อาจเสีย โดยทุกข้อต้องอ้างตัวเลขจริงจากข้อมูล เช่น ข่าวที่ใกล้เข้ามา ระยะห่างจากโซน สภาพ stack อายุ SAR สถิติที่บันทึกไว้ session และสถานะ Risk Desk แล้วปิดท้ายด้วยประโยคเดียว: ต้องเห็นอะไรก่อนถึงจะสมควรกด\n\n' + ctx }
+      { role: 'system', content: SYSTEM_PROMPT + '\n\nโหมดพิเศษ: ตอนนี้คุณสวมบท DEVIL\'S ADVOCATE ของ Risk Desk — หน้าที่คือพยายามฆ่าไอเดียเทรดที่ระบุ ห้ามอวย ห้ามหาข้อดี ห้ามปลอบ' },
+      { role: 'user', content: 'เป้าหมายที่ต้องโจมตี: ' + desc + '\n\nหาเหตุผล 3 ข้อที่ชัดเจนที่สุดว่าทำไมไม้นี้อาจเสีย โดยทุกข้อต้องอ้างตัวเลขจริงจากข้อมูล เช่น ข่าวที่ใกล้เข้ามา ระยะห่างจากโซน สภาพ stack อายุ SAR สถิติที่บันทึกไว้ session และสถานะ Risk Desk แล้วปิดท้ายด้วยประโยคเดียว: ' + (target === 'open' ? 'ควรถือต่อหรือควรจัดการยังไงตามระบบ' : 'ต้องเห็นอะไรก่อนถึงจะสมควรกด') + '\n\n' + ctx }
     ], 2000);
     res.json({ ok: true, text });
   } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
