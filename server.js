@@ -77,6 +77,17 @@ function newsLockFor(sym) {
   const now = Date.now();
   return newsFor(sym, 1).find(e => e.impact === 'High' && now >= e.t - 15 * 60000 && now <= e.t + 15 * 60000) || null;
 }
+// signed minutes to nearest High-impact event within +/-120min, else null
+function newsProximity(sym) {
+  const now = Date.now(), ccy = newsCcy(sym);
+  let best = null;
+  for (const e of newsCache.events) {
+    if (e.impact !== 'High' || !ccy.has(e.ccy)) continue;
+    const m = Math.round((e.t - now) / 60000);
+    if (Math.abs(m) <= 120 && (best === null || Math.abs(m) < Math.abs(best))) best = m;
+  }
+  return best;
+}
 
 // ---------- confluence score (same formula as dashboard) ----------
 function confluenceOf(sym, d) {
@@ -141,7 +152,9 @@ function record(sym, prev, d) {
       st.seen.add(key);
       if (st.seen.size > 1200) st.seen = new Set(Array.from(st.seen).slice(-600));
       logAppend('events.jsonl', { at: now, sym, key, ts: ev.ts, line: ev.line, type: ev.type, pts: ev.pts,
-        ctx: { biasBuy: !!(d.h4 && d.h4.biasBuy), sarUp: !!(d.sar && d.sar.up), stack: stackStr(d), bid: d.bid, conf } });
+        ctx: { biasBuy: !!(d.h4 && d.h4.biasBuy), sarUp: !!(d.sar && d.sar.up), stack: stackStr(d), bid: d.bid, conf,
+               spread: (typeof d.spread === 'number' ? d.spread : null),
+               newsMin: newsProximity(sym), newsLock: !!newsLockFor(sym) } });
     }
     // SAR regimes: from first dot to next flip -> was the first dot right?
     if (d.sar) {
@@ -175,6 +188,8 @@ function record(sym, prev, d) {
         const base = { at: now, id: dl.id, pos: dl.pos, sym: dl.symd || sym, dir: dl.dir,
                        price: dl.price, lot: dl.lot, t: dl.t };
         if (dl.e === 'in') {
+          if (!st.openTrades) st.openTrades = {};
+          st.openTrades[dl.pos] = { t: dl.t, price: dl.price, dir: dl.dir };
           logAppend('trades.jsonl', Object.assign(base, { kind: 'open', ctx: {
             conf, grade: conf >= 80 ? 'A' : conf >= 65 ? 'B' : conf >= 50 ? 'C' : 'D',
             biasBuy: !!(d.h4 && d.h4.biasBuy), session: sessOf(Math.floor(now / 1000)),
@@ -184,7 +199,25 @@ function record(sym, prev, d) {
           broadcast({ type: 'trade', sym, at: now,
             txt: 'เปิดไม้ ' + dl.dir.toUpperCase() + ' ' + dl.lot + ' ' + (dl.symd || sym) + ' @ ' + dl.price + ' (grade ' + (conf >= 80 ? 'A' : conf >= 65 ? 'B' : conf >= 50 ? 'C' : 'D') + ')', pl: 0 });
         } else {
-          logAppend('trades.jsonl', Object.assign(base, { kind: 'close', pl: dl.pl }));
+          let src = st.openTrades && st.openTrades[dl.pos];
+          if (!src) {
+            const o = readTail('trades.jsonl', 400).find(e => e.kind === 'open' && e.pos === dl.pos);
+            if (o) src = { t: o.t, price: o.price, dir: o.dir };
+          }
+          let mfe = null, mae = null;
+          if (src && Array.isArray(d.bars) && d.bars.length) {
+            const nb = d.bars.map(b => b.length >= 5 ? { t: b[0], h: b[2], l: b[3] } : { t: b[0], h: b[1], l: b[2] });
+            const endT = dl.t || Math.floor(now / 1000);
+            const seg = nb.filter(b => b.t >= (src.t || 0) - 900 && b.t <= endT + 900);
+            if (seg.length) {
+              let hi = -1e18, lo = 1e18;
+              seg.forEach(b => { hi = Math.max(hi, b.h); lo = Math.min(lo, b.l); });
+              if (src.dir === 'buy') { mfe = +(hi - src.price).toFixed(5); mae = +(src.price - lo).toFixed(5); }
+              else { mfe = +(src.price - lo).toFixed(5); mae = +(hi - src.price).toFixed(5); }
+            }
+          }
+          if (st.openTrades) delete st.openTrades[dl.pos];
+          logAppend('trades.jsonl', Object.assign(base, { kind: 'close', pl: dl.pl, mfe, mae }));
           broadcast({ type: 'trade', sym, at: now,
             txt: 'ปิดไม้ ' + (dl.symd || sym) + ' ' + (dl.pl >= 0 ? '+' : '') + dl.pl + ' USD', pl: dl.pl });
         }
@@ -197,7 +230,8 @@ function record(sym, prev, d) {
       st.lastStructHour = hour;
       logAppend('structure.jsonl', { at: now, sym, bid: d.bid, stack: stackStr(d),
         biasBuy: !!(d.h4 && d.h4.biasBuy), sarUp: !!(d.sar && d.sar.up),
-        sarBars: (d.sar && d.sar.bars) || 0, dist100: (d.checks && d.checks.dist100) });
+        sarBars: (d.sar && d.sar.bars) || 0, dist100: (d.checks && d.checks.dist100),
+        spread: (typeof d.spread === 'number' ? d.spread : null) });
     }
   } catch (e) { console.error('record failed:', e.message); }
 }
@@ -510,8 +544,9 @@ function quantSummary(sym, days) {
 
   const lines = {};
   for (const e of evs) {
-    const L = lines[e.line] || (lines[e.line] = { bounces: [], breaks: [] });
+    const L = lines[e.line] || (lines[e.line] = { bounces: [], breaks: [], spreads: [] });
     if (e.type === 'bounce') L.bounces.push(e.pts || 0); else L.breaks.push(e.pts || 0);
+    if (e.ctx && typeof e.ctx.spread === 'number') L.spreads.push(e.ctx.spread);
   }
   const lineStats = {};
   for (const nm of Object.keys(lines)) {
@@ -523,7 +558,8 @@ function quantSummary(sym, days) {
       n, bounces: nb, breaks: nx, holdRate: Math.round(hold * 100),
       avgBounce: +avgB.toFixed(2), medBounce: +pctl(L.bounces, .5).toFixed(2),
       avgBreakDepth: +avgX.toFixed(2),
-      expectancy: +(hold * avgB - (1 - hold) * avgX).toFixed(2)
+      expectancy: +(hold * avgB - (1 - hold) * avgX).toFixed(2),
+      avgSpread: (function(){ const sp = L.spreads || []; return sp.length ? +(sp.reduce((a,b)=>a+b,0)/sp.length).toFixed(2) : null; })()
     };
   }
 
@@ -551,7 +587,9 @@ function quantSummary(sym, days) {
     byStack: split(w, alignedFn),
     byBias: split(w, e => e.ctx ? (e.ctx.biasBuy ? 'BUY bias' : 'SELL bias') : null),
     byGrade: split(w, e => (e.ctx && typeof e.ctx.conf === 'number')
-      ? (e.ctx.conf >= 80 ? 'A' : e.ctx.conf >= 65 ? 'B' : e.ctx.conf >= 50 ? 'C' : 'D') : null)
+      ? (e.ctx.conf >= 80 ? 'A' : e.ctx.conf >= 65 ? 'B' : e.ctx.conf >= 50 ? 'C' : 'D') : null),
+    byNews: split(w, e => (e.ctx && e.ctx.newsMin !== undefined)
+      ? ((e.ctx.newsMin !== null && Math.abs(e.ctx.newsMin) <= 30) ? 'ใกล้ข่าว ±30น' : 'ห่างข่าว') : null)
   };
 
   const sarBy = a => ({
@@ -570,10 +608,14 @@ function quantSummary(sym, days) {
 
   // real trade attribution (from account deals)
   const trRaw = readTail('trades.jsonl', 2000).filter(e => e.at >= cutoff && e.sym === sym);
-  const opens = {}, plByPos = {};
+  const opens = {}, plByPos = {}, mfeByPos = {}, maeByPos = {};
   for (const e of trRaw) {
     if (e.kind === 'open') opens[e.pos] = e;
-    else if (e.kind === 'close') plByPos[e.pos] = (plByPos[e.pos] || 0) + (e.pl || 0);
+    else if (e.kind === 'close') {
+      plByPos[e.pos] = (plByPos[e.pos] || 0) + (e.pl || 0);
+      if (typeof e.mfe === 'number') mfeByPos[e.pos] = Math.max(mfeByPos[e.pos] || -1e18, e.mfe);
+      if (typeof e.mae === 'number') maeByPos[e.pos] = Math.max(maeByPos[e.pos] || -1e18, e.mae);
+    }
   }
   const closed = Object.keys(plByPos).map(pos => ({
     pos, pl: +plByPos[pos].toFixed(2),
@@ -600,6 +642,8 @@ function quantSummary(sym, days) {
     avgLoss: losses.length ? +(gsum(losses) / losses.length).toFixed(2) : 0,
     profitFactor: (losses.length && gsum(losses) !== 0) ? +Math.abs(gsum(wins) / gsum(losses)).toFixed(2) : null,
     netPL: +gsum(closed).toFixed(2),
+    avgMFE: (function(){ const v = Object.values(mfeByPos).filter(x => x > -1e17); return v.length ? +(v.reduce((a,b)=>a+b,0)/v.length).toFixed(2) : null; })(),
+    avgMAE: (function(){ const v = Object.values(maeByPos).filter(x => x > -1e17); return v.length ? +(v.reduce((a,b)=>a+b,0)/v.length).toFixed(2) : null; })(),
     byGrade: tradeSplit(t => t.grade),
     bySession: tradeSplit(t => t.session)
   };
