@@ -23,6 +23,16 @@ const aiState = {};   // symbol -> { lastAutoAt }
 function authOk(req) { if (!KEY) return true; return req.get('X-MAXX-KEY') === KEY; }
 function pinOk(req)  { if (!AI_PIN) return true; return req.get('X-DASH-PIN') === AI_PIN; }
 
+// global AI rate limit - caps quota burn if the URL leaks (AI_HOURLY_LIMIT to adjust)
+const aiCalls = [];
+function aiRateOk() {
+  const now = Date.now();
+  while (aiCalls.length && now - aiCalls[0] > 3600000) aiCalls.shift();
+  if (aiCalls.length >= Number(process.env.AI_HOURLY_LIMIT || 40)) return false;
+  aiCalls.push(now);
+  return true;
+}
+
 function broadcast(obj) {
   const msg = 'data: ' + JSON.stringify(obj) + '\n\n';
   for (const c of clients) { try { c.write(msg); } catch (e) { clients.delete(c); } }
@@ -313,6 +323,7 @@ async function maybeAutoComment(sym, prev, d) {
 // ---------- AI on-demand endpoints ----------
 app.post('/api/ai/summary', async (req, res) => {
   if (!pinOk(req)) return res.status(401).json({ ok: false, error: 'bad pin' });
+  if (!aiRateOk()) return res.status(429).json({ ok: false, error: 'AI rate limit reached - try again later' });
   const sym = (req.body && req.body.sym) || Object.keys(snapshots)[0];
   const ctx = snapshotContext(sym);
   if (!ctx) return res.status(400).json({ ok: false, error: 'no live data for ' + sym });
@@ -327,6 +338,7 @@ app.post('/api/ai/summary', async (req, res) => {
 
 app.post('/api/ai/chat', async (req, res) => {
   if (!pinOk(req)) return res.status(401).json({ ok: false, error: 'bad pin' });
+  if (!aiRateOk()) return res.status(429).json({ ok: false, error: 'AI rate limit reached - try again later' });
   const b = req.body || {};
   const sym = b.sym || Object.keys(snapshots)[0];
   const ctx = snapshotContext(sym) || 'no live data yet';
