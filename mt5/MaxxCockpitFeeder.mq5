@@ -5,7 +5,7 @@
 //| Attach to an M15 chart of each symbol you want on the dashboard. |
 //+------------------------------------------------------------------+
 #property copyright "Maxx"
-#property version   "0.62"
+#property version   "0.63"
 #property strict
 
 input string InpURL         = "https://your-app.up.railway.app/api/snapshot"; // Server URL (/api/snapshot)
@@ -17,6 +17,7 @@ input int    InpMaxEvents   = 10;            // Max history events to send
 input int    InpMaxTradesDay  = 6;           // Risk: max trades per day
 input int    InpMaxLossStreak = 3;           // Risk: max consecutive losses
 input double InpMaxDayLossPct = 3.0;         // Risk: max daily loss (% of balance)
+input bool   InpManualOnly    = true;        // Count only manual trades (magic 0) in risk/attribution
 
 // --- indicator handles ---
 int hW50, hW89, hW100, hW144, hE200, hW800, hSAR, hH4W50, hH1W50, hH1W100;
@@ -293,6 +294,7 @@ string BuildAcct()
         {
          ulong tk = HistoryDealGetTicket(i);
          if(tk == 0) continue;
+         if(InpManualOnly && HistoryDealGetInteger(tk, DEAL_MAGIC) != 0) continue;
          long en = HistoryDealGetInteger(tk, DEAL_ENTRY);
          double pl = HistoryDealGetDouble(tk, DEAL_PROFIT)
                    + HistoryDealGetDouble(tk, DEAL_SWAP)
@@ -343,6 +345,7 @@ string BuildDeals()
       ulong tk = HistoryDealGetTicket(i);
       if(tk <= g_lastDeal) continue;
       if(tk > maxTk) maxTk = tk;
+      if(InpManualOnly && HistoryDealGetInteger(tk, DEAL_MAGIC) != 0) continue;
       long en = HistoryDealGetInteger(tk, DEAL_ENTRY);
       if(en != DEAL_ENTRY_IN && en != DEAL_ENTRY_OUT) continue;
       long dtype = HistoryDealGetInteger(tk, DEAL_TYPE);
@@ -378,6 +381,7 @@ string BuildPos()
      {
       ulong tk = PositionGetTicket(i);
       if(tk == 0) continue;
+      if(InpManualOnly && PositionGetInteger(POSITION_MAGIC) != 0) continue;
       long ptype = PositionGetInteger(POSITION_TYPE);
       if(cnt > 0) out += ",";
       out += "{\"dir\":\"" + (ptype == POSITION_TYPE_BUY ? "buy" : "sell") + "\"";
