@@ -843,6 +843,10 @@ function quantSummary(sym, days) {
     avgLoss: losses.length ? +(gsum(losses) / losses.length).toFixed(2) : 0,
     profitFactor: (losses.length && gsum(losses) !== 0) ? +Math.abs(gsum(wins) / gsum(losses)).toFixed(2) : null,
     netPL: +gsum(closed).toFixed(2),
+    followRate: closed.length ? Math.round(100 * closed.filter(t => {
+      const o = opens[t.pos];
+      return o && o.ctx && o.ctx.inZone && o.ctx.bounce;
+    }).length / closed.length) : null,
     avgMFE: (function(){ const v = Object.values(mfeByPos).filter(x => x > -1e17); return v.length ? +(v.reduce((a,b)=>a+b,0)/v.length).toFixed(2) : null; })(),
     avgMAE: (function(){ const v = Object.values(maeByPos).filter(x => x > -1e17); return v.length ? +(v.reduce((a,b)=>a+b,0)/v.length).toFixed(2) : null; })(),
     byGrade: tradeSplit(t => t.grade),
@@ -892,6 +896,85 @@ app.get('/api/quant', (req, res) => {
   const sym = req.query.sym || Object.keys(snapshots)[0] || 'XAUUSD';
   const days = Math.min(180, Math.max(1, Number(req.query.days) || 30));
   res.json(quantSummary(sym, days));
+});
+
+// ---------- weekly review assistant ----------
+function pbScore(sym) {
+  const tail = readTail('predictions.jsonl', 500).filter(e => e.sym === sym);
+  const grades = tail.filter(e => e.kind === 'grade');
+  const sysG = grades.filter(g => typeof g.sysWin === 'boolean');
+  const aiG = grades.filter(g => typeof g.aiWin === 'boolean');
+  return {
+    graded: grades.length,
+    sysAcc: sysG.length ? Math.round(100 * sysG.filter(g => g.sysWin).length / sysG.length) : null,
+    aiAcc: aiG.length ? Math.round(100 * aiG.filter(g => g.aiWin).length / aiG.length) : null
+  };
+}
+const REVIEW_PROMPT = 'คุณคือนักวิเคราะห์ quant ประจำกองทุนส่วนตัวของ Maxx หน้าที่คือตอบคำถามรีวิวผลงานจากข้อมูล JSON ที่แนบมาเท่านั้น กติกาเคร่งครัด: 1) ทุกข้อสรุปต้องอ้างตัวเลขจริงพร้อม n 2) ถ้า n ต่ำกว่า 30 ในเรื่องไหน ต้องเขียนกำกับว่า "ข้อมูลยังน้อย ยังสรุปแน่นอนไม่ได้" 3) ห้ามแต่งตัวเลขที่ไม่มีในข้อมูลเด็ดขาด 4) expectancy เป็นค่า proxy ยังไม่รวม spread ให้ระบุทุกครั้งที่พูดถึง (ยกเว้นบอกว่าหักแล้ว) 5) ตอบภาษาไทย กระชับ เป็นข้อๆ ไม่เกิน 8 บรรทัด จบด้วยหนึ่งประโยค: สิ่งเดียวที่ควรทำต่อจากข้อมูลนี้';
+
+app.post('/api/ai/review', async (req, res) => {
+  if (!pinOk(req)) return res.status(401).json({ ok: false, error: 'bad pin' });
+  if (!aiRateOk()) return res.status(429).json({ ok: false, error: 'AI rate limit reached - try again later' });
+  const sym = (req.body && req.body.sym) || Object.keys(snapshots)[0] || 'XAUUSD';
+  const days = Math.min(90, Math.max(1, Number(req.body && req.body.days) || 7));
+  const q = req.body && req.body.q;
+  if (!q) return res.status(400).json({ ok: false, error: 'no question' });
+  try {
+    const quant = quantSummary(sym, days);
+    const ctx = 'QUANT DATA (' + days + ' days, ' + sym + '):' + String.fromCharCode(10) + JSON.stringify(quant)
+      + String.fromCharCode(10) + 'PLAYBOOK PREDICTION SCORE: ' + JSON.stringify(pbScore(sym));
+    const text = await askKimi([
+      { role: 'system', content: REVIEW_PROMPT },
+      { role: 'user', content: 'คำถามรีวิว: ' + q + String.fromCharCode(10, 10) + ctx }
+    ], 2000);
+    res.json({ ok: true, text });
+  } catch (e) { noteAiError(e.message); res.status(502).json({ ok: false, error: e.message }); }
+});
+
+// ---------- FUND CHARTER: pre-registered decision criteria (locked) ----------
+const CHARTER = {
+  version: 1,
+  sym: 'XAUUSD',
+  start: '2026-08-12',
+  decide: '2026-11-12',
+  title: 'FUND CHARTER v1 — กติกาตัดสินชะตา (เขียนล็อคไว้ 12 ส.ค. 2026 ก่อนเห็นผลลัพธ์)',
+  gates: [
+    { id: 'edge', name: 'GATE 1 — Edge มีจริง', desc: 'expectancy ต่อการชน WMA100 หลังหัก spread เฉลี่ย >= +1.5 จุด ที่ n >= 150' },
+    { id: 'filter', name: 'GATE 2 — Filter ใช้ได้', desc: 'session ที่ดีที่สุดมี hold rate >= 60% ที่ n >= 40' },
+    { id: 'pilot', name: 'GATE 3 — มือทำตามระบบ', desc: 'ไม้ demo ปิดแล้ว >= 25 ไม้, เข้าตาม checklist ครบ >= 80%, profit factor >= 1.2' },
+    { id: 'ops', name: 'GATE 4 — ระบบเชื่อถือได้', desc: 'feed ขาดรวมไม่เกิน 12 ชั่วโมงตลอดช่วงเก็บข้อมูล' }
+  ],
+  rules: [
+    'ผ่านครบ 4 GATE -> เติมเงินจริง: จำนวนที่ยอมเสียได้ 100% เท่านั้น และ risk ไม่เกิน 0.5% ต่อไม้ในเดือนแรก',
+    'GATE 1 ผ่าน แต่ข้ออื่นไม่ครบ -> ต่อ demo อีก 6 สัปดาห์ เฉพาะข้อที่ไม่ผ่าน แล้วประเมินใหม่',
+    'GATE 1 ไม่ผ่าน (expectancy หลัง spread <= 0 ที่ n >= 150) -> ไม่เติมเงินจริงกับระบบนี้ ห้ามต่อรอง ห้ามหาข้ออ้าง — กลับไปแก้ระบบใหญ่หรือหา edge ใหม่',
+    'ห้ามแก้กติกานี้ก่อนวันตัดสิน 12 พ.ย. 2026 — แก้ได้ทางเดียวคือจด amendment พร้อมเหตุผลและวันที่ ซึ่งจะถูกบันทึกถาวร'
+  ]
+};
+app.get('/api/charter', (req, res) => {
+  const sym = CHARTER.sym;
+  const q = quantSummary(sym, 90);
+  const w = q.lineStats && q.lineStats.WMA100;
+  const expNet = (w && w.n) ? +(w.expectancy - (w.avgSpread || 0)).toFixed(2) : null;
+  let bestSess = null;
+  for (const k of Object.keys((q.w100 && q.w100.bySession) || {})) {
+    const o = q.w100.bySession[k];
+    if (!bestSess || o.holdRate > bestSess.holdRate) bestSess = Object.assign({ name: k }, o);
+  }
+  const feedGapMin = readTail('health.jsonl', 2000)
+    .filter(e => e.type === 'feed_gap' && e.at >= Date.parse(CHARTER.start))
+    .reduce((a, e) => a + (e.durMin || 0), 0);
+  const t = q.trades || {};
+  const daysLeft = Math.max(0, Math.ceil((Date.parse(CHARTER.decide) - Date.now()) / 86400000));
+  res.json({
+    charter: CHARTER, daysLeft,
+    progress: {
+      edge: { value: expNet, n: w ? w.n : 0, need: '>= +1.5 (n>=150)', pass: expNet != null && expNet >= 1.5 && w.n >= 150 },
+      filter: { value: bestSess ? bestSess.holdRate : null, session: bestSess ? bestSess.name : null, n: bestSess ? bestSess.n : 0, need: '>= 60% (n>=40)', pass: !!(bestSess && bestSess.holdRate >= 60 && bestSess.n >= 40) },
+      pilot: { closed: t.n || 0, followRate: t.followRate, pf: t.profitFactor, need: '25 ไม้ / 80% / PF 1.2', pass: !!((t.n || 0) >= 25 && (t.followRate || 0) >= 80 && (t.profitFactor || 0) >= 1.2) },
+      ops: { feedGapMin: +feedGapMin.toFixed(1), need: '< 720 นาที', pass: feedGapMin < 720 }
+    }
+  });
 });
 
 app.get('/api/news', (req, res) => {
