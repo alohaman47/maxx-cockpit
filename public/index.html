@@ -350,6 +350,18 @@ function el(id){ return document.getElementById(id); }
 function etTime(dateObj){
   return dateObj.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'America/New_York'});
 }
+// trading-day open (Pepperstone day starts 17:00 ET = NY close): trading-day id = ET date of (ts + 7h)
+function dayOpenFromBars(d){
+  if (!d.bars || d.bars.length < 2) return null;
+  var f = S._df || (S._df = new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}));
+  function tday(tsSec){ return f.format(new Date((tsSec + 7*3600) * 1000)); }
+  var cur = tday(d.bars[d.bars.length-1][0]);
+  for (var i = 0; i < d.bars.length; i++){
+    var b = d.bars[i];
+    if (tday(b[0]) === cur) return b.length >= 5 ? b[1] : null; // need open field (EA v0.50+)
+  }
+  return null;
+}
 // event time: prefer epoch ts from EA; fallback = server "HH:MM" minus 7h (Pepperstone tracks NY close year-round)
 function evTime(ev){
   if (ev.ts) return etTime(new Date(ev.ts * 1000));
@@ -468,7 +480,13 @@ function render(){
   el('grid').style.display = '';
   el('biasbar').style.display = '';
 
-  el('px').innerHTML = fmt(d.bid, dg) + '<small>bid · '+etTime(new Date(rec.at))+' ET</small>';
+  var dOpen = dayOpenFromBars(d), chgHtml = '';
+  if (dOpen){
+    var chg = d.bid - dOpen, pct = dOpen ? (chg / dOpen * 100) : 0;
+    var cc = chg > 0 ? 'var(--buy)' : chg < 0 ? 'var(--sell)' : 'var(--dim)';
+    chgHtml = '<span style="color:'+cc+';font-weight:700">'+(chg>=0?'+':'')+fmt(chg,dg)+' ('+(chg>=0?'+':'')+pct.toFixed(2)+'%)</span> วันนี้ · ';
+  }
+  el('px').innerHTML = fmt(d.bid, dg) + '<small>' + chgHtml + 'bid · '+etTime(new Date(rec.at))+' ET</small>';
 
   // bias strip
   var up = d.bid > d.h4.wma50;
