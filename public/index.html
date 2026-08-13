@@ -74,6 +74,7 @@
   .heatchip{font-family:var(--mono);font-size:11px;color:var(--dim);border:1px solid var(--line);padding:5px 10px;border-radius:8px;display:none;letter-spacing:.03em}
   .heatchip.up{color:var(--buy);border-color:rgba(30,201,126,.5)}
   .heatchip.dn{color:#ff9fae;border-color:rgba(240,80,106,.5)}
+  .heatchip.side{color:var(--wait);border-color:rgba(240,180,60,.45)}
   .heatchip.hotmkt{font-weight:700;box-shadow:0 0 10px rgba(240,180,60,.18)}
   .newschip.hot{color:#ffb3c0;border-color:rgba(240,80,106,.55)}
   .newslock{display:none;margin-bottom:14px;padding:12px 18px;border-radius:12px;border:1px solid rgba(240,80,106,.6);background:linear-gradient(90deg,rgba(240,80,106,.16),rgba(240,80,106,.03));color:#ff9fae;font-weight:700;letter-spacing:.05em;animation:pulse 1.8s infinite}
@@ -388,13 +389,13 @@ function marketHeat(d){
   var mode = (er >= 0.45 && Math.abs(net) >= atrB) ? (net > 0 ? 'up' : 'dn') : 'side';
   var strong = mode !== 'side' && ratio >= 1.3;
   return { mode: mode, strong: strong, net: net, ratio: ratio,
-    label: mode === 'side' ? 'SIDEWAY' : (net > 0 ? 'ขึ้น' : 'ลง') + (strong ? 'แรง' : '') };
+    label: mode === 'side' ? 'SIDEWAY' : (net > 0 ? 'กระทิง' : 'หมี') + (strong ? 'แรง' : '') };
 }
 function renderHeat(d, dg){
   var chip = el('heatchip'), h = marketHeat(d);
   if (!h){ chip.style.display = 'none'; return; }
   chip.style.display = 'inline-block';
-  chip.className = 'heatchip' + (h.mode === 'up' ? ' up' : h.mode === 'dn' ? ' dn' : '') + (h.ratio >= 1.3 ? ' hotmkt' : '');
+  chip.className = 'heatchip' + (h.mode === 'up' ? ' up' : h.mode === 'dn' ? ' dn' : ' side') + (h.ratio >= 1.3 ? ' hotmkt' : '');
   chip.textContent = h.label + ' ' + (h.net >= 0 ? '+' : '') + fmt(h.net, dg) + ' · 2ชม · vol x' + h.ratio.toFixed(1);
   chip.title = 'สภาพตลาด 2 ชม.ล่าสุด — vol เทียบเฉลี่ย 24 ชม. (x1.0 = ปกติ)';
   var key = h.label + (h.ratio >= 1.8 ? '·เดือด' : '');
