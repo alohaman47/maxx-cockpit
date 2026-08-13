@@ -99,6 +99,17 @@
   .sigwrap{display:flex;flex-direction:column;gap:14px}
   .sigcard{border-radius:14px;padding:28px 20px;text-align:center;background:linear-gradient(180deg,#161a24,#10131b);border:1px solid var(--hair);box-shadow:0 1px 0 rgba(233,208,138,.2) inset,0 10px 28px rgba(0,0,0,.38)}
   .sigcard.buy{background:radial-gradient(ellipse at top,rgba(30,201,126,.14),transparent 70%),var(--panel2);border-color:rgba(30,201,126,.5)}
+  .pipeline{display:flex;justify-content:center;align-items:flex-start;gap:8px;margin:16px 0 6px}
+  .pstep{display:flex;flex-direction:column;align-items:center;gap:5px;font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;color:var(--dim);min-width:52px}
+  .pstep .pd{width:10px;height:10px;border-radius:50%;background:#242938;border:1px solid var(--line)}
+  .pstep.on{color:var(--text)}
+  .pstep.on .pd{background:var(--buy);border-color:var(--buy);box-shadow:0 0 8px rgba(30,201,126,.5)}
+  .pstep.hot .pd{background:var(--wait);border-color:var(--wait);box-shadow:0 0 8px rgba(240,180,60,.5);animation:pulse 1.8s infinite}
+  .pstep.hot{color:var(--wait)}
+  .parrow{color:#3a4155;font-size:11px;margin-top:2px;font-family:var(--mono)}
+  .nextstep{margin-top:14px;padding-top:12px;border-top:1px solid rgba(36,41,56,.6);font-size:13px;color:var(--gold2);line-height:1.55}
+  .nextstep b{color:var(--text)}
+  .ctxstat{margin-top:8px;font-family:var(--mono);font-size:11px;color:var(--dim)}
   .sigcard.sell{background:radial-gradient(ellipse at top,rgba(255,77,103,.14),transparent 70%),var(--panel2);border-color:rgba(255,77,103,.5)}
   .sigcard.ready{box-shadow:0 0 26px rgba(30,201,126,.25)}
   .sigstate{font-family:var(--serif);font-size:38px;font-weight:700;letter-spacing:.14em}
@@ -238,12 +249,15 @@
     <div class="sigcard" id="sigcard">
       <div class="sigstate" id="sigstate"></div>
       <div class="sigsub" id="sigsub"></div>
+      <div class="pipeline" id="pipeline"></div>
       <div class="sigmeta">
         <div>ระยะถึง WMA100<b id="m_dist"></b></div>
         <div>องค์ประกอบ<b id="m_comp"></b></div>
         <div>อัพเดตล่าสุด<b id="m_time"></b></div>
         <div>Confluence<b id="m_conf"></b></div>
       </div>
+      <div class="nextstep" id="nextstep"></div>
+      <div class="ctxstat" id="ctxstat" style="display:none"></div>
     </div>
     <div class="panel">
       <div class="ptitle">Checklist ก่อนกด — ตามเทคนิค</div>
@@ -350,6 +364,24 @@ function el(id){ return document.getElementById(id); }
 function etTime(dateObj){
   return dateObj.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'America/New_York'});
 }
+// current ET session (same boundaries as server sessOf)
+function sessNowET(){
+  var h = parseInt((S._hf2 || (S._hf2 = new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'numeric',hour12:false}))).format(new Date()),10) % 24;
+  if (h >= 19 || h < 3) return 'ASIA';
+  if (h < 8) return 'LONDON';
+  if (h < 17) return 'NY';
+  return 'OFF';
+}
+// quant summary for the context-stats line on the signal card (30-day window, refresh 5 min)
+S.quant = {};
+async function loadQuant(){
+  if (!S.active) return;
+  try {
+    var r = await fetch('/api/quant?sym=' + encodeURIComponent(S.active) + '&days=30');
+    if (r.ok) S.quant[S.active] = await r.json();
+  } catch(e){}
+}
+setInterval(loadQuant, 5 * 60000);
 // trading-day open (Pepperstone day starts 17:00 ET = NY close): trading-day id = ET date of (ts + 7h)
 function dayOpenFromBars(d){
   if (!d.bars || d.bars.length < 2) return null;
@@ -434,7 +466,7 @@ es.onmessage = function(e){
   }
   S.symbols[m.sym] = { data: m.data, at: Date.now() };
   detect(m.sym, m.data);
-  if (!S.active){ S.active = m.sym; loadNews(); }
+  if (!S.active){ S.active = m.sym; loadNews(); loadQuant(); }
   renderTabs();
   if (m.sym === S.active) render();
 };
@@ -447,7 +479,7 @@ function renderTabs(){
     return '<button class="symtab'+(s===S.active?' active':'')+'" onclick="setSym(\''+s+'\')">'+s+'</button>';
   }).join('');
 }
-function setSym(s){ S.active = s; renderTabs(); render(); renderChat(); loadNews(); }
+function setSym(s){ S.active = s; renderTabs(); render(); renderChat(); loadNews(); loadQuant(); }
 
 // ---- stale watchdog ----
 setInterval(function(){
@@ -595,6 +627,49 @@ function render(){
   el('m_dist').textContent = (c.dist100>=0?'-':'+')+fmt(Math.abs(c.dist100),dg)+' pts';
   el('m_comp').textContent = compCount + ' / 3';
   el('m_time').textContent = etTime(new Date(rec.at)) + ' ET';
+
+  // pipeline: which gate is the setup stuck at
+  var curGate = !compsOk ? 1 : !c.inZone100 ? 2 : !c.bounceConfirm ? 3 : -1;
+  var psteps = [
+    {k:'BIAS', on:true}, {k:'STACK', on:compsOk},
+    {k:'ZONE', on:!!c.inZone100}, {k:'BOUNCE', on:!!c.bounceConfirm}
+  ];
+  el('pipeline').innerHTML = psteps.map(function(s,i){
+    return (i ? '<div class="parrow">›</div>' : '')
+      + '<div class="pstep '+(s.on?'on':'')+(i===curGate?' hot':'')+'"><div class="pd"></div>'+s.k+'</div>';
+  }).join('');
+
+  // next step: what has to happen next, in one line
+  var ns;
+  if (curGate === 1){
+    var miss = [];
+    if (!c.stackOk) miss.push('stack M15 เรียง'+(bb?'ขาขึ้น':'ขาลง'));
+    if (!c.emaOk) miss.push('ราคา'+(bb?'เหนือ':'ใต้')+' EMA200');
+    if (!c.sarOk) miss.push('SAR พลิก'+(bb?'ใต้':'เหนือ')+'ราคา');
+    ns = 'รอ <b>'+miss.join(' + ')+'</b> ก่อน → แล้วค่อยรอราคาเข้าโซน WMA100';
+  } else if (curGate === 2){
+    ns = 'องค์ประกอบครบแล้ว — รอราคา'+(bb?'ย่อลงแตะ':'เด้งขึ้นแตะ')+'โซน <b>WMA100 ที่ '+fmt(d.lines.WMA100,dg)+'</b> (อีก '+fmt(Math.abs(c.dist100),dg)+' pts) → จากนั้นรอแท่งเด้งยืนยัน';
+  } else if (curGate === 3){
+    var m5hint = (d.m5 && d.m5.bars && d.m5.bars.length > 2) ? ' · ดูช่อง M5 TRIGGER ช่วยจับจังหวะ' : '';
+    ns = 'อยู่ในโซนแล้ว — รอ<b>แท่ง M15 ปิดกลับ'+(bb?'ขึ้น':'ลง')+'</b>ยืนยันการเด้ง'+m5hint;
+  } else {
+    ns = 'ครบทุกเงื่อนไข — <b>ทำตามแผนด้านขวาใน MT5</b> · SL แถว WMA144 · TP ตาม SAR trailing';
+  }
+  if (S.news && S.news.lock) ns = '<span style="color:var(--sell);font-weight:800">NEWS LOCK — งดกดช่วงข่าว</span> · ' + ns;
+  el('nextstep').innerHTML = ns;
+
+  // context stats for this session/side from our own research books
+  var q = S.quant && S.quant[S.active], cs = el('ctxstat');
+  if (q){
+    var sess = sessNowET(), parts = [];
+    var ws = q.w100 && q.w100.bySession && q.w100.bySession[sess];
+    if (ws && ws.n) parts.push('WMA100 ช่วง '+sess+': รับอยู่ '+ws.holdRate+'% (n='+ws.n+')');
+    var sd = q.sar && (bb ? q.sar.up : q.sar.down);
+    if (sd && sd.n) parts.push('SAR ฝั่ง '+(bb?'BUY':'SELL')+': แม่น '+(sd.winRate==null?'—':sd.winRate+'%')+' (n='+sd.n+')');
+    if (parts.length && q.lowSample) parts.push('ข้อมูลยังน้อย');
+    cs.style.display = parts.length ? '' : 'none';
+    cs.textContent = parts.join(' · ');
+  } else cs.style.display = 'none';
 
   var sl = bb ? d.lines.WMA144 : d.lines.WMA144;
   el('plan').innerHTML = 'แผน: <b>'+side+'</b> ที่โซน WMA100 · SL แถว <b>'+fmt(sl,dg)+'</b> (WMA144) · TP = SAR trailing · <b>กดจริงใน MT5</b>';
