@@ -53,7 +53,7 @@
   .biasverdict .v{font-family:var(--serif);font-size:18px;font-weight:700;letter-spacing:.12em}
   .biasverdict .d{font-size:11.5px;color:var(--dim)}
 
-  .grid{display:grid;grid-template-columns:300px 1fr 320px;gap:14px}
+  .grid{display:grid;grid-template-columns:330px 1fr 290px;gap:14px}
   @media(max-width:1100px){.grid{grid-template-columns:1fr}}
   .panel{background:linear-gradient(180deg,#141822,#0e1016);border:1px solid var(--hair);border-radius:14px;padding:17px;box-shadow:0 1px 0 rgba(233,208,138,.2) inset,0 10px 28px rgba(0,0,0,.38)}
   .ptitle{font-size:10.5px;letter-spacing:.24em;color:#a79c80;font-weight:600;margin-bottom:14px;text-transform:uppercase}
@@ -237,6 +237,7 @@
 <div class="newslock" id="newslock"></div>
 
 <div class="grid" id="grid" style="display:none">
+  <div class="colwrap">
   <div class="panel">
     <div class="ptitle">MA Stack Ladder — ราคาอยู่ตรงไหน</div>
     <div class="pdrow" id="pdrow" style="display:none"></div>
@@ -249,6 +250,24 @@
     <div class="ptitle" style="margin-top:16px">ประวัติชนเส้น — ล่าสุด</div>
     <div class="hist" id="hist"></div>
     <div class="histsum" id="histsum" style="display:none"></div>
+  </div>
+    <div class="panel">
+      <div class="ptitle">AI Analyst — Kimi</div>
+      <button class="aibtn" id="aisum">สรุปสถานการณ์ตอนนี้</button>
+      <button class="aibtn devil" id="aidevil">DEVIL'S ADVOCATE — เลือกเป้าโจมตี</button>
+      <div class="devrow" id="devrow" style="display:none">
+        <button class="devopt" onclick="aiDevil('system')">ไม้ตามระบบ</button>
+        <button class="devopt" onclick="aiDevil('buy')">BUY ตอนนี้</button>
+        <button class="devopt" onclick="aiDevil('sell')">SELL ตอนนี้</button>
+        <button class="devopt" onclick="aiDevil('open')">ไม้ที่เปิดอยู่</button>
+      </div>
+      <div class="aiout" id="aiout"></div>
+      <div class="aichat" id="aichat"></div>
+      <div class="airow">
+        <input id="aiq" placeholder="ถามจากข้อมูลสด เช่น เมื่อคืน WMA100 รับกี่รอบ" onkeydown="if(event.key==='Enter')aiAsk()">
+        <button onclick="aiAsk()">ถาม</button>
+      </div>
+    </div>
   </div>
 
   <div class="sigwrap">
@@ -302,23 +321,6 @@
     <div class="panel" id="riskpanel">
       <div class="ptitle">Risk Desk — วินัยประจำวัน</div>
       <div id="riskbox"></div>
-    </div>
-    <div class="panel">
-      <div class="ptitle">AI Analyst — Kimi</div>
-      <button class="aibtn" id="aisum">สรุปสถานการณ์ตอนนี้</button>
-      <button class="aibtn devil" id="aidevil">DEVIL'S ADVOCATE — เลือกเป้าโจมตี</button>
-      <div class="devrow" id="devrow" style="display:none">
-        <button class="devopt" onclick="aiDevil('system')">ไม้ตามระบบ</button>
-        <button class="devopt" onclick="aiDevil('buy')">BUY ตอนนี้</button>
-        <button class="devopt" onclick="aiDevil('sell')">SELL ตอนนี้</button>
-        <button class="devopt" onclick="aiDevil('open')">ไม้ที่เปิดอยู่</button>
-      </div>
-      <div class="aiout" id="aiout"></div>
-      <div class="aichat" id="aichat"></div>
-      <div class="airow">
-        <input id="aiq" placeholder="ถามจากข้อมูลสด เช่น เมื่อคืน WMA100 รับกี่รอบ" onkeydown="if(event.key==='Enter')aiAsk()">
-        <button onclick="aiAsk()">ถาม</button>
-      </div>
     </div>
     <div class="panel">
       <div class="ptitle">Signal Feed</div>
