@@ -1151,7 +1151,9 @@ function openNewsModal(){
       var h = e.hist;
       var sc = h.avgAbs15 >= 20 ? 5 : h.avgAbs15 >= 12 ? 4 : h.avgAbs15 >= 7 ? 3 : h.avgAbs15 >= 3.5 ? 2 : 1;
       var sTip = 'แรงต่อทองจากสถิติของเราเอง: เหวี่ยงเฉลี่ย ' + h.avgAbs15 + ' จุดใน 15 น (เก็บมา ' + h.n + ' ครั้ง)';
-      stars = ' <span style="letter-spacing:1.5px;font-size:13px;cursor:default" title="' + sTip + '"><span style="color:#e9d08a">' + Array(sc+1).join('★') + '</span><span style="color:#3a4155">' + Array(5-sc+1).join('★') + '</span></span>'
+      var scol = sc >= 5 ? '#ff5d76' : sc >= 4 ? '#ff9333' : sc >= 3 ? '#f5c542' : '#25c684';
+      var sglow = sc >= 4 ? 'text-shadow:0 0 8px ' + scol + '55;' : '';
+      stars = ' <span style="letter-spacing:1.5px;font-size:14px;cursor:default" title="' + sTip + '"><span style="color:' + scol + ';' + sglow + '">' + Array(sc+1).join('★') + '</span><span style="color:#3a4155">' + Array(5-sc+1).join('★') + '</span></span>'
         + (h.n < 3 ? ' <span style="font-family:var(--mono);font-size:10px;color:var(--dim)">n=' + h.n + '</span>' : '');
       hist = '<div style="font-family:var(--mono);font-size:11px;color:var(--gold2);margin-top:3px">สถิติที่ระบบเก็บเอง (' + h.n + ' ครั้ง): เหวี่ยงเฉลี่ย ' + h.avgAbs15 + ' จุดใน 15น · ขึ้น ' + h.upPct + '% · สุทธิเฉลี่ย ' + (h.avg15 > 0 ? '+' : '') + h.avg15 + '</div>';
     } else {
