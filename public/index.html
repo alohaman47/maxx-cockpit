@@ -1093,8 +1093,8 @@ function updateNews(){
   });
   chip.style.display = 'inline-block';
   if (next){
-    var m = Math.round((next.t - now) / 60000), hh = Math.floor(m / 60), mm = m % 60;
-    chip.textContent = next.ccy + ' ' + next.title + ' · อีก ' + (hh ? hh + ' ชม ' : '') + mm + ' น';
+    var m = Math.round((next.t - now) / 60000);
+    chip.textContent = next.ccy + ' ' + next.title + ' · ' + (m > 720 ? etDay(next.t) + ' ' : '') + 'อีก ' + humanIn(next.t - now);
     chip.className = 'newschip' + (m <= 60 ? ' hot' : '');
   } else {
     var released = (S.news.events || []).filter(function(e){ return e.t <= now; }).length;
@@ -1113,13 +1113,24 @@ function updateNews(){
   lockEl.style.display = lockNow ? 'block' : 'none';
   if (lockNow) lockEl.textContent = 'NEWS LOCK — ' + lockEv.ccy + ' ' + lockEv.title + ' · งดกดออเดอร์ช่วงข่าว (±15 นาที) · confluence ถูกหัก 25 แต้ม';
 }
+// ET date (Thai short) + human countdown for news times
+function etDay(t){
+  return (S._ddf || (S._ddf = new Intl.DateTimeFormat('th-TH',{timeZone:'America/New_York',weekday:'short',day:'numeric',month:'short'}))).format(new Date(t));
+}
+function humanIn(ms){
+  var m = Math.round(ms / 60000);
+  if (m < 60) return m + ' น';
+  var h = Math.floor(m / 60);
+  if (h < 24) return h + ' ชม ' + (m % 60) + ' น';
+  return Math.floor(h / 24) + ' วัน ' + (h % 24) + ' ชม';
+}
 function openNewsModal(){
   var evs = S.news.events || [], now = Date.now();
   var dg = (S.symbols[S.active] && S.symbols[S.active].data.digits) || 2;
   function row(e){
     var past = e.t <= now;
     var impCol = e.impact === 'High' ? 'var(--sell)' : 'var(--wait)';
-    var when = etTime(new Date(e.t)) + (past ? ' · ออกแล้ว' : ' · อีก ' + Math.round((e.t - now) / 60000) + ' น');
+    var when = etDay(e.t) + ' ' + etTime(new Date(e.t)) + ' ET' + (past ? ' · ออกแล้ว ' + humanIn(now - e.t) + 'ก่อน' : ' · อีก ' + humanIn(e.t - now));
     var nums = [];
     if (e.actual) nums.push('จริง <b style="color:var(--text)">' + e.actual + '</b>');
     if (e.forecast) nums.push('คาด ' + e.forecast);
@@ -1150,7 +1161,7 @@ function openNewsModal(){
   var past = evs.filter(function(e){ return e.t <= now; });
   var next = evs.filter(function(e){ return e.t > now; });
   el('newslist').innerHTML =
-      (past.length ? '<div class="ptitle">ออกแล้ววันนี้</div>' + past.map(row).join('') : '')
+      (past.length ? '<div class="ptitle">ออกแล้ว</div>' + past.map(row).join('') : '')
     + (next.length ? '<div class="ptitle" style="margin-top:14px">กำลังจะมา</div>' + next.map(row).join('') : '')
     + (!evs.length ? '<div style="color:var(--dim);font-family:var(--mono);font-size:12px">ยังไม่มีข่าวในช่วง 12 ชม.ที่ผ่านมาถึง 72 ชม.ข้างหน้า</div>' : '');
   el('newsmodal').classList.add('show');
