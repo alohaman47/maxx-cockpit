@@ -311,6 +311,9 @@ function statsText(sym, days) {
 
 // ---------- session stats in ET (for AI context) ----------
 const hourFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false });
+const dayFmtET = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
+const timeFmtET = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false });
+function etDayKey(ms) { return dayFmtET.format(new Date(ms)); }
 function sessOf(ts) {
   const h = parseInt(hourFmt.format(new Date(ts * 1000)), 10) % 24;
   if (h >= 19 || h < 3) return 'ASIA';
@@ -395,7 +398,11 @@ function snapshotContext(sym) {
         : 'none recorded yet (history builds from today)');
     })(),
     'RECENT NEWS REACTIONS (measured from price): ' + (newsCache.events.filter(e => newsCcy(sym).has(e.ccy) && e.impact === 'High' && e.t <= Date.now() && e.t > Date.now() - 12 * 3600000).map(e => { const r = newsReaction(sym, e.t); return e.title + (e.actual ? ' actual ' + e.actual + ' vs fc ' + (e.forecast || '?') : '') + (r ? ' -> gold ' + (r.p15 > 0 ? '+' : '') + r.p15 + ' in 15min' + (r.p30 != null ? ', ' + (r.p30 > 0 ? '+' : '') + r.p30 + ' in 30min' : '') : ''); }).join(' | ') || 'none'),
-    'RECORDED RESEARCH STATS (last 7 days, logged by this cockpit):\n' + statsText(sym, 7)
+    'RECORDED RESEARCH STATS (last 7 days, logged by this cockpit):\n' + statsText(sym, 7),
+    'TRADER JOURNAL (the trader\'s own notes; his personal setups like PA+Market Structure or PA+Momentum are separate techniques from this cockpit\'s WMA+SAR system - judge each entry against the setup it names, not against the system checklist):\n' + (readTail('journal.jsonl', 80).filter(e => !e.sym || e.sym === sym).slice(-10).map(e =>
+      etDayKey(e.at) + ' ' + timeFmtET.format(new Date(e.at)) + ' ET [' + e.tag + (e.setup ? '/' + e.setup : '') + '] ' + String(e.text || '').slice(0, 200) +
+      (e.ctx ? ' {' + [e.ctx.bid ? '@' + e.ctx.bid : '', e.ctx.state, e.ctx.heat, e.ctx.lock ? 'NEWS LOCK' : ''].filter(Boolean).join(', ') + '}' : '')
+    ).join('\n') || 'no entries yet')
   ].join('\n');
 }
 
@@ -1110,6 +1117,51 @@ app.get('/api/stats', (req, res) => {
   const sym = req.query.sym || Object.keys(snapshots)[0] || '';
   const days = Math.min(90, Math.max(1, Number(req.query.days) || 7));
   res.json(statsSummary(sym, days));
+});
+
+// ---------- trader journal (book #10: journal.jsonl + editable setup list) ----------
+const JOURNAL_TAGS = ['entry', 'exit', 'lesson', 'emotion', 'note'];
+const SETUPS_FILE = 'journal_setups.json';
+const DEFAULT_SETUPS = ['WMA+SAR ตามระบบ', 'PA + Market Structure', 'PA + Momentum'];
+function loadSetups() {
+  try {
+    const l = JSON.parse(fs.readFileSync(path.join(DATA_DIR, SETUPS_FILE), 'utf8'));
+    return Array.isArray(l) && l.length ? l : DEFAULT_SETUPS.slice();
+  } catch (e) { return DEFAULT_SETUPS.slice(); }
+}
+function saveSetups(list) {
+  try { fs.writeFileSync(path.join(DATA_DIR, SETUPS_FILE), JSON.stringify(list.slice(0, 40))); } catch (e) {}
+}
+app.post('/api/journal', (req, res) => {
+  if (!pinOk(req)) return res.status(401).json({ ok: false, error: 'bad pin' });
+  const b = req.body || {};
+  const text = String(b.text || '').trim().slice(0, 2000);
+  if (!text) return res.status(400).json({ ok: false, error: 'empty text' });
+  const tag = JOURNAL_TAGS.includes(b.tag) ? b.tag : 'note';
+  const setup = String(b.setup || '').trim().slice(0, 60);
+  const c = b.ctx && typeof b.ctx === 'object' ? b.ctx : null;
+  const entry = {
+    at: Date.now(), sym: String(b.sym || '').slice(0, 12) || null, tag, setup: setup || null, text,
+    ctx: c ? {
+      bid: Number(c.bid) || null,
+      state: String(c.state || '').slice(0, 90) || null,
+      heat: String(c.heat || '').slice(0, 60) || null,
+      lock: !!c.lock
+    } : null
+  };
+  logAppend('journal.jsonl', entry);
+  if (setup) {
+    const list = loadSetups();
+    if (!list.includes(setup)) { list.push(setup); saveSetups(list); }
+  }
+  res.json({ ok: true, entry, setups: loadSetups() });
+});
+app.get('/api/journal', (req, res) => {
+  if (!pinOk(req)) return res.status(401).json({ ok: false, error: 'bad pin' });
+  const all = readTail('journal.jsonl', 1000);
+  const day = req.query.day;
+  const rows = day ? all.filter(e => etDayKey(e.at) === day) : all.slice(-120);
+  res.json({ ok: true, entries: rows, setups: loadSetups() });
 });
 
 app.get('/health', (req, res) => res.json({
