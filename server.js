@@ -1156,6 +1156,33 @@ app.post('/api/journal', (req, res) => {
   }
   res.json({ ok: true, entry, setups: loadSetups() });
 });
+app.get('/api/trades', (req, res) => {
+  if (!pinOk(req)) return res.status(401).json({ ok: false, error: 'bad pin' });
+  const all = readTail('trades.jsonl', 2000);
+  const rows = [], byPos = {};
+  for (const e of all) {
+    if (e.kind === 'open') {
+      const r = { pos: e.pos, sym: e.sym, dir: e.dir, lot: e.lot,
+        openAt: e.at, openT: e.t || null, openPrice: e.price, ctx: e.ctx || null,
+        closeAt: null, closePrice: null, pl: null, mfe: null, mae: null };
+      rows.push(r); byPos[e.pos] = r;
+    } else if (e.kind === 'close') {
+      let r = byPos[e.pos];
+      if (!r || r.closeAt != null) {
+        r = { pos: e.pos, sym: e.sym, dir: e.dir, lot: e.lot,
+          openAt: null, openT: null, openPrice: null, ctx: null,
+          closeAt: null, closePrice: null, pl: null, mfe: null, mae: null };
+        rows.push(r);
+      }
+      r.closeAt = e.at; r.closePrice = e.price; r.pl = e.pl; r.mfe = e.mfe; r.mae = e.mae;
+      byPos[e.pos] = r;
+    }
+  }
+  const day = req.query.day;
+  const filt = day ? rows.filter(r => etDayKey(r.closeAt || r.openAt || 0) === day) : rows.slice(-80);
+  res.json({ ok: true, trades: filt });
+});
+
 app.get('/api/journal', (req, res) => {
   if (!pinOk(req)) return res.status(401).json({ ok: false, error: 'bad pin' });
   const all = readTail('journal.jsonl', 1000);
