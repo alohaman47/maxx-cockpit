@@ -92,6 +92,16 @@
   .jbody{font-size:12.5px;margin-top:3px;line-height:1.5}
   .jctx{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:3px}
   .jempty{color:var(--dim);font-size:11.5px;text-align:center;padding:10px 0}
+  .tlsum{font-family:var(--mono);font-size:11px;color:var(--gold2);margin-bottom:8px}
+  .tlrow{display:flex;align-items:center;gap:10px;padding:7px 9px;background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-bottom:6px;font-size:12px;flex-wrap:wrap}
+  .tldir{font-family:var(--mono);font-weight:800;font-size:11px;padding:2px 7px;border-radius:6px}
+  .tldir.buy{color:var(--buy);border:1px solid rgba(30,201,126,.45)}
+  .tldir.sell{color:var(--sell);border:1px solid rgba(240,80,106,.45)}
+  .tlpl{font-family:var(--mono);font-weight:800;margin-left:auto}
+  .tlmeta{font-family:var(--mono);font-size:10px;color:var(--dim);width:100%}
+  .tlsys{font-size:9.5px;font-family:var(--mono);padding:1px 6px;border-radius:6px;border:1px solid var(--line);color:var(--dim)}
+  .tlsys.in{color:var(--buy);border-color:rgba(30,201,126,.45)}
+  .tlgrade{font-size:9.5px;font-family:var(--mono);padding:1px 6px;border-radius:6px;border:1px solid var(--hair);color:var(--gold2)}
   .newschip.hot{color:#ffb3c0;border-color:rgba(240,80,106,.55)}
   .newslock{display:none;margin-bottom:14px;padding:12px 18px;border-radius:12px;border:1px solid rgba(240,80,106,.6);background:linear-gradient(90deg,rgba(240,80,106,.16),rgba(240,80,106,.03));color:#ff9fae;font-weight:700;letter-spacing:.05em;animation:pulse 1.8s infinite}
   .h1cell{display:flex;flex-direction:column;justify-content:center;gap:2px;padding:12px 16px;border-left:1px solid var(--line);flex-shrink:0}
@@ -331,6 +341,12 @@
       <div id="pbbox"><div class="plan">รอ session แรกปิด (03:00 / 08:00 / 17:00 ET) ระบบจะวิเคราะห์เอง หรือกดวิเคราะห์ทันที</div></div>
       <button class="aibtn" id="pbrun" style="margin-top:10px">วิเคราะห์ session ที่เพิ่งจบตอนนี้</button>
     </div>
+    <div class="panel">
+      <div class="ptitle">TRADE LOG — ไม้จริงจาก MT5</div>
+      <div class="jnav"><button onclick="tDay(-1)">◀</button><span id="tday"></span><button onclick="tDay(1)">▶</button></div>
+      <div class="tlsum" id="tlsum"></div>
+      <div class="tllist" id="tllist"></div>
+    </div>
   </div>
 
   <div class="colwrap">
@@ -536,6 +552,7 @@ es.onmessage = function(e){
   if (m.type === 'trade'){
     pushFeed(m.sym, m.pl > 0 ? 'b' : (m.pl < 0 ? 's' : 'tr'), String(m.txt).replace(/</g,'&lt;'));
     if (m.sym === S.active) render();
+    if (S.tradelog.dayOffset === 0) tLoad();
     return;
   }
   S.symbols[m.sym] = { data: m.data, at: Date.now() };
@@ -1000,6 +1017,68 @@ document.addEventListener('change', function(ev){
   }
 });
 renderJTags(); renderSetups(''); jLoad();
+
+// ---- Trade Log (auto-captured from EA deals) ----
+S.tradelog = { dayOffset: 0, rows: [] };
+function tDay(dir){ S.tradelog.dayOffset = Math.min(0, S.tradelog.dayOffset + dir); tLoad(); }
+async function tLoad(){
+  try {
+    var j = await jFetch('/api/trades?day=' + jDayKeyET(S.tradelog.dayOffset));
+    if (!j.ok) return;
+    S.tradelog.rows = j.trades || [];
+    renderTrades();
+  } catch(e){}
+}
+function tSys(r){ // entered while system READY?
+  var c = r.ctx; if (!c) return null;
+  return !!(c.stackOk && c.sarOk && c.inZone && c.bounce);
+}
+function tHold(r){
+  if (!r.openAt || !r.closeAt) return '';
+  var m = Math.round((r.closeAt - r.openAt) / 60000);
+  return m < 60 ? m + ' น' : Math.floor(m/60) + ' ชม ' + (m%60) + ' น';
+}
+function renderTrades(){
+  el('tday').textContent = S.tradelog.dayOffset === 0 ? 'วันนี้' : jDayKeyET(S.tradelog.dayOffset);
+  var rows = S.tradelog.rows;
+  if (!rows.length){
+    el('tlsum').innerHTML = '';
+    el('tllist').innerHTML = '<div class="jempty">ยังไม่มีไม้วันนี้ — เปิด/ปิดไม้ใน MT5 แล้วระบบบันทึกให้เองพร้อมสถานะระบบ ณ ตอนเข้า</div>';
+    return;
+  }
+  var closed = rows.filter(function(r){ return r.pl != null; });
+  var net = closed.reduce(function(a,r){ return a + r.pl; }, 0);
+  var wins = closed.filter(function(r){ return r.pl > 0; }).length;
+  var sysRows = closed.filter(function(r){ return tSys(r) === true; });
+  var offRows = closed.filter(function(r){ return tSys(r) === false; });
+  var sysNet = sysRows.reduce(function(a,r){ return a + r.pl; }, 0);
+  var offNet = offRows.reduce(function(a,r){ return a + r.pl; }, 0);
+  el('tlsum').innerHTML = rows.length + ' ไม้ · ปิดแล้ว ' + closed.length
+    + ' · สุทธิ <b style="color:' + (net >= 0 ? 'var(--buy)' : 'var(--sell)') + '">' + (net >= 0 ? '+' : '') + net.toFixed(2) + ' USD</b>'
+    + (closed.length ? ' · ชนะ ' + wins + '/' + closed.length : '')
+    + (sysRows.length || offRows.length ? ' · ตามระบบ ' + sysRows.length + ' (' + (sysNet >= 0 ? '+' : '') + sysNet.toFixed(2) + ') · นอกระบบ ' + offRows.length + ' (' + (offNet >= 0 ? '+' : '') + offNet.toFixed(2) + ')' : '');
+  el('tllist').innerHTML = rows.slice().reverse().map(function(r){
+    var sys = tSys(r);
+    var plHtml = r.pl != null
+      ? '<span class="tlpl" style="color:' + (r.pl >= 0 ? 'var(--buy)' : 'var(--sell)') + '">' + (r.pl >= 0 ? '+' : '') + r.pl.toFixed(2) + '</span>'
+      : '<span class="tlpl" style="color:var(--wait)">ถืออยู่</span>';
+    var meta = [];
+    if (r.openAt) meta.push('เข้า ' + etTime(new Date(r.openAt)) + (r.openPrice ? ' @' + r.openPrice : ''));
+    if (r.closeAt) meta.push('ออก ' + etTime(new Date(r.closeAt)) + (r.closePrice ? ' @' + r.closePrice : ''));
+    if (r.openAt && r.closeAt) meta.push('ถือ ' + tHold(r));
+    if (r.mfe != null) meta.push('MFE +' + r.mfe + ' / MAE -' + r.mae);
+    if (r.ctx && r.ctx.session) meta.push(r.ctx.session);
+    return '<div class="tlrow">'
+      + '<span class="tldir ' + (r.dir === 'buy' ? 'buy' : 'sell') + '">' + String(r.dir || '?').toUpperCase() + '</span>'
+      + '<span style="font-family:var(--mono);font-size:11px">' + (r.lot || '') + ' ' + esc(r.sym || '') + '</span>'
+      + (r.ctx && r.ctx.grade ? '<span class="tlgrade">grade ' + esc(r.ctx.grade) + '</span>' : '')
+      + (sys === null ? '' : '<span class="tlsys' + (sys ? ' in' : '') + '">' + (sys ? 'ตามระบบ' : 'นอกระบบ') + '</span>')
+      + plHtml
+      + (meta.length ? '<div class="tlmeta">' + esc(meta.join(' · ')) + '</div>' : '')
+      + '</div>';
+  }).join('');
+}
+tLoad();
 async function aiSummary(){
   var btn = el('aisum'), out = el('aiout');
   btn.disabled = true; btn.textContent = 'กำลังวิเคราะห์...';
