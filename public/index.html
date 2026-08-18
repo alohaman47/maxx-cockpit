@@ -76,6 +76,22 @@
   .heatchip.dn{color:#ff9fae;border-color:rgba(240,80,106,.5)}
   .heatchip.side{color:var(--wait);border-color:rgba(240,180,60,.45)}
   .heatchip.hotmkt{font-weight:700;box-shadow:0 0 10px rgba(240,180,60,.18)}
+  .jtags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+  .jtag{font-family:var(--mono);font-size:10.5px;background:none;border:1px solid var(--line);color:var(--dim);padding:4px 9px;border-radius:7px;cursor:pointer}
+  .jstarters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+  .jstart{font-size:10.5px;background:none;border:1px dashed var(--line);color:var(--dim);padding:3px 8px;border-radius:7px;cursor:pointer}
+  #jsetup{width:100%;background:var(--panel);border:1px solid var(--line);color:var(--text);font-family:var(--mono);font-size:11px;padding:6px;border-radius:7px;margin-bottom:7px}
+  #jtext{width:100%;box-sizing:border-box;background:var(--panel);border:1px solid var(--line);color:var(--text);font-size:12.5px;padding:8px;border-radius:8px;resize:vertical;min-height:52px;font-family:inherit}
+  .jsave{width:100%;margin-top:7px;background:linear-gradient(180deg,rgba(233,208,138,.16),rgba(233,208,138,.05));border:1px solid var(--hair2);color:var(--gold2);font-weight:700;padding:8px;border-radius:8px;cursor:pointer;letter-spacing:.06em}
+  .jnav{display:flex;align-items:center;justify-content:center;gap:10px;margin:10px 0 6px;font-family:var(--mono);font-size:11px;color:var(--dim)}
+  .jnav button{background:none;border:1px solid var(--line);color:var(--dim);border-radius:6px;cursor:pointer;padding:2px 8px}
+  .jitem{border-left:2px solid var(--line);padding:6px 8px;margin-bottom:7px;background:var(--panel);border-radius:0 8px 8px 0}
+  .jhead{display:flex;gap:8px;align-items:center;font-family:var(--mono);font-size:10.5px}
+  .jsetupb{border:1px solid var(--hair);color:var(--gold2);padding:1px 6px;border-radius:6px;font-size:10px}
+  .jtime{margin-left:auto;color:var(--dim)}
+  .jbody{font-size:12.5px;margin-top:3px;line-height:1.5}
+  .jctx{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:3px}
+  .jempty{color:var(--dim);font-size:11.5px;text-align:center;padding:10px 0}
   .newschip.hot{color:#ffb3c0;border-color:rgba(240,80,106,.55)}
   .newslock{display:none;margin-bottom:14px;padding:12px 18px;border-radius:12px;border:1px solid rgba(240,80,106,.6);background:linear-gradient(90deg,rgba(240,80,106,.16),rgba(240,80,106,.03));color:#ff9fae;font-weight:700;letter-spacing:.05em;animation:pulse 1.8s infinite}
   .h1cell{display:flex;flex-direction:column;justify-content:center;gap:2px;padding:12px 16px;border-left:1px solid var(--line);flex-shrink:0}
@@ -325,6 +341,21 @@
     <div class="panel">
       <div class="ptitle">Signal Feed</div>
       <div class="feed" id="feed"></div>
+    </div>
+    <div class="panel">
+      <div class="ptitle">JOURNAL — สมุดบันทึก</div>
+      <div class="jtags" id="jtags"></div>
+      <div class="jstarters">
+        <button class="jstart" onclick="jStart('เข้าเพราะ ')">เข้าเพราะ…</button>
+        <button class="jstart" onclick="jStart('ไม่เข้าเพราะ ')">ไม่เข้าเพราะ…</button>
+        <button class="jstart" onclick="jStart('พลาดตรงที่ ')">พลาดตรงที่…</button>
+        <button class="jstart" onclick="jStart('วันนี้ได้เรียนรู้ว่า ')">ได้เรียนรู้ว่า…</button>
+      </div>
+      <select id="jsetup"></select>
+      <textarea id="jtext" rows="2" placeholder="จดสิ่งที่คิด… ระบบแปะราคา/สถานะ/ตลาดให้เองตอนกดจด"></textarea>
+      <button class="jsave" onclick="jSave()">จดบันทึก</button>
+      <div class="jnav"><button onclick="jDay(-1)">◀</button><span id="jday"></span><button onclick="jDay(1)">▶</button></div>
+      <div class="jlist" id="jlist"></div>
       <div class="footer">MAXX COCKPIT v1.7 · live · กดออเดอร์จริงใน MT5</div>
     </div>
   </div>
@@ -878,6 +909,97 @@ async function aiPost(url, body){
   if (!j.ok) throw new Error(j.error || 'AI error');
   return j.text;
 }
+
+// ---- Journal (book #10) ----
+S.journal = { tag: 'note', entries: [], setups: [], dayOffset: 0 };
+var JTAGS = [['entry','เข้าไม้','#25c684'],['exit','ออกไม้','#ff9333'],['lesson','บทเรียน','#e9d08a'],['emotion','อารมณ์','#a06bff'],['note','ทั่วไป','#8f96a5']];
+function jTagMeta(t){ for (var i=0;i<JTAGS.length;i++) if (JTAGS[i][0]===t) return JTAGS[i]; return JTAGS[4]; }
+function renderJTags(){
+  el('jtags').innerHTML = JTAGS.map(function(t){
+    var on = S.journal.tag === t[0];
+    return '<button class="jtag" style="'+(on ? 'color:'+t[2]+';border-color:'+t[2]+';font-weight:700' : '')+'" onclick="jSetTag(\''+t[0]+'\')">'+t[1]+'</button>';
+  }).join('');
+}
+function jSetTag(t){ S.journal.tag = t; renderJTags(); }
+function jStart(s){ var ta = el('jtext'); ta.value = ta.value ? (ta.value.replace(/\s+$/,'') + ' ' + s) : s; ta.focus(); }
+function jDayKeyET(off){
+  return (S._jdf || (S._jdf = new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}))).format(new Date(Date.now() + off*86400000));
+}
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+function renderSetups(keep){
+  var sel = el('jsetup');
+  var opts = ['<option value="">setup: — ไม่ระบุ —</option>'];
+  S.journal.setups.forEach(function(s){ opts.push('<option value="'+esc(s)+'"'+(s===keep?' selected':'')+'>'+esc(s)+'</option>'); });
+  opts.push('<option value="__new__">+ เพิ่ม setup ใหม่…</option>');
+  sel.innerHTML = opts.join('');
+}
+function renderJournal(){
+  el('jday').textContent = S.journal.dayOffset === 0 ? 'วันนี้' : jDayKeyET(S.journal.dayOffset);
+  var rows = S.journal.entries;
+  if (!rows.length){ el('jlist').innerHTML = '<div class="jempty">ยังไม่มีบันทึกวันนี้ — จดสั้นๆ ก็ยังดีกว่าไม่จด</div>'; return; }
+  el('jlist').innerHTML = rows.slice().reverse().map(function(e){
+    var t = jTagMeta(e.tag);
+    var ctx = e.ctx ? [e.ctx.bid ? '@' + fmt(e.ctx.bid, 2) : '', e.ctx.state, e.ctx.heat, e.ctx.lock ? 'NEWS LOCK' : ''].filter(Boolean).join(' · ') : '';
+    return '<div class="jitem" style="border-left-color:'+t[2]+'">'
+      + '<div class="jhead"><span style="color:'+t[2]+'">'+t[1]+'</span>'
+      + (e.setup ? '<span class="jsetupb">'+esc(e.setup)+'</span>' : '')
+      + '<span class="jtime">'+etTime(new Date(e.at))+' ET</span></div>'
+      + '<div class="jbody">'+esc(e.text).replace(/\n/g,'<br>')+'</div>'
+      + (ctx ? '<div class="jctx">'+esc(ctx)+'</div>' : '') + '</div>';
+  }).join('');
+}
+function jDay(dir){ S.journal.dayOffset = Math.min(0, S.journal.dayOffset + dir); jLoad(); }
+async function jFetch(url, opts){
+  opts = opts || {}; opts.headers = pinHeaders();
+  var r = await fetch(url, opts);
+  if (r.status === 401){
+    var p = prompt('ใส่ AI PIN (ค่าตัวแปร AI_PIN บน Railway)');
+    if (p){ try{ localStorage.setItem('dashpin', p); }catch(e){}
+      opts.headers = pinHeaders(); r = await fetch(url, opts); }
+  }
+  return r.json();
+}
+async function jLoad(){
+  try {
+    var j = await jFetch('/api/journal?day=' + jDayKeyET(S.journal.dayOffset));
+    if (!j.ok) return;
+    S.journal.entries = j.entries || [];
+    S.journal.setups = j.setups || [];
+    renderSetups(el('jsetup').value); renderJournal();
+  } catch(e){}
+}
+async function jSave(){
+  var ta = el('jtext'), text = ta.value.trim();
+  if (!text) return;
+  var setup = el('jsetup').value; if (setup === '__new__') setup = '';
+  var d = S.symbols[S.active] && S.symbols[S.active].data;
+  var hot = document.querySelector('.pstep.hot');
+  var body = { sym: S.active, tag: S.journal.tag, setup: setup, text: text, ctx: d ? {
+    bid: d.bid,
+    state: (el('sigstate').textContent || '').trim() + (hot ? ' @' + hot.textContent.trim() : ''),
+    heat: (el('heatchip').textContent || '').trim(),
+    lock: !!(S.news && S.news.lock)
+  } : null };
+  try {
+    var j = await jFetch('/api/journal', { method: 'POST', body: JSON.stringify(body) });
+    if (j.ok){
+      ta.value = ''; S.journal.dayOffset = 0;
+      if (j.setups) S.journal.setups = j.setups;
+      jLoad();
+    } else alert(j.error || 'จดไม่สำเร็จ');
+  } catch(e){ alert('จดไม่สำเร็จ - ' + e.message); }
+}
+document.addEventListener('change', function(ev){
+  if (ev.target && ev.target.id === 'jsetup' && ev.target.value === '__new__'){
+    var name = prompt('ชื่อ setup ใหม่ เช่น PA + Order Block');
+    if (name && name.trim()){
+      name = name.trim().slice(0, 60);
+      if (S.journal.setups.indexOf(name) < 0) S.journal.setups.push(name);
+      renderSetups(name);
+    } else renderSetups('');
+  }
+});
+renderJTags(); renderSetups(''); jLoad();
 async function aiSummary(){
   var btn = el('aisum'), out = el('aiout');
   btn.disabled = true; btn.textContent = 'กำลังวิเคราะห์...';
