@@ -399,6 +399,17 @@ function snapshotContext(sym) {
     })(),
     'RECENT NEWS REACTIONS (measured from price): ' + (newsCache.events.filter(e => newsCcy(sym).has(e.ccy) && e.impact === 'High' && e.t <= Date.now() && e.t > Date.now() - 12 * 3600000).map(e => { const r = newsReaction(sym, e.t); return e.title + (e.actual ? ' actual ' + e.actual + ' vs fc ' + (e.forecast || '?') : '') + (r ? ' -> gold ' + (r.p15 > 0 ? '+' : '') + r.p15 + ' in 15min' + (r.p30 != null ? ', ' + (r.p30 > 0 ? '+' : '') + r.p30 + ' in 30min' : '') : ''); }).join(' | ') || 'none'),
     'RECORDED RESEARCH STATS (last 7 days, logged by this cockpit):\n' + statsText(sym, 7),
+    'RECENT REAL TRADES (auto-captured from his MT5 account by this cockpit):\n' + (pairTrades(400).filter(r => !r.sym || r.sym === sym).slice(-8).map(r => {
+      const sys = r.ctx ? (r.ctx.stackOk && r.ctx.sarOk && r.ctx.inZone && r.ctx.bounce) : null;
+      return (r.openAt ? etDayKey(r.openAt) + ' ' + timeFmtET.format(new Date(r.openAt)) + ' ET ' : '') + String(r.dir || '?').toUpperCase() + ' ' + (r.lot || '') +
+        (r.openPrice ? ' @' + r.openPrice : '') + (r.closePrice ? ' -> ' + r.closePrice : ' (still open)') +
+        (r.pl != null ? ' pl ' + (r.pl >= 0 ? '+' : '') + r.pl : '') +
+        (r.ctx && r.ctx.grade ? ' grade ' + r.ctx.grade : '') +
+        (sys === null ? '' : sys ? ' [system entry]' : ' [off-system entry]') +
+        (r.mfe != null ? ' mfe +' + r.mfe + ' mae -' + r.mae : '') +
+        (r.ctx && r.ctx.session ? ' ' + r.ctx.session : '');
+    }).join('\n') || 'none recorded yet'),
+    'GRADE RUBRIC (how this cockpit grades each trade at the moment of entry): confluence 0-100 = stack aligned +25, right side of EMA200 +10, SAR right side +15, in WMA100 zone +20 (near zone +10/+5), WMA100 bounce history today up to +15, PDH/PDL confluence +10, NEWS LOCK -25; grade A>=80 B>=65 C>=50 else D. IMPORTANT: grade measures alignment with the WMA+SAR system ONLY, not trade quality - his personal PA setups (PA+Market Structure, PA+Momentum) will normally read C/D and that is expected; never scold an off-system trade for being off-system, judge it by the setup named in his journal instead.',
     'TRADER JOURNAL (the trader\'s own notes; his personal setups like PA+Market Structure or PA+Momentum are separate techniques from this cockpit\'s WMA+SAR system - judge each entry against the setup it names, not against the system checklist):\n' + (readTail('journal.jsonl', 80).filter(e => !e.sym || e.sym === sym).slice(-10).map(e =>
       etDayKey(e.at) + ' ' + timeFmtET.format(new Date(e.at)) + ' ET [' + e.tag + (e.setup ? '/' + e.setup : '') + '] ' + String(e.text || '').slice(0, 200) +
       (e.ctx ? ' {' + [e.ctx.bid ? '@' + e.ctx.bid : '', e.ctx.state, e.ctx.heat, e.ctx.lock ? 'NEWS LOCK' : ''].filter(Boolean).join(', ') + '}' : '')
@@ -1156,9 +1167,8 @@ app.post('/api/journal', (req, res) => {
   }
   res.json({ ok: true, entry, setups: loadSetups() });
 });
-app.get('/api/trades', (req, res) => {
-  if (!pinOk(req)) return res.status(401).json({ ok: false, error: 'bad pin' });
-  const all = readTail('trades.jsonl', 2000);
+function pairTrades(n) {
+  const all = readTail('trades.jsonl', n || 2000);
   const rows = [], byPos = {};
   for (const e of all) {
     if (e.kind === 'open') {
@@ -1178,6 +1188,11 @@ app.get('/api/trades', (req, res) => {
       byPos[e.pos] = r;
     }
   }
+  return rows;
+}
+app.get('/api/trades', (req, res) => {
+  if (!pinOk(req)) return res.status(401).json({ ok: false, error: 'bad pin' });
+  const rows = pairTrades(2000);
   const day = req.query.day;
   const filt = day ? rows.filter(r => etDayKey(r.closeAt || r.openAt || 0) === day) : rows.slice(-80);
   res.json({ ok: true, trades: filt });
