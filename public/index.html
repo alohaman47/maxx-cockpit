@@ -1415,7 +1415,7 @@ function openNewsModal(){
   el('newslist').innerHTML =
       (past.length ? '<div class="ptitle">ออกแล้ว</div>' + past.map(row).join('') : '')
     + (next.length ? '<div class="ptitle" style="margin-top:14px">กำลังจะมา</div>' + next.map(row).join('') : '')
-    + (!evs.length ? '<div style="color:var(--dim);font-family:var(--mono);font-size:12px">ยังไม่มีข่าวในช่วง 12 ชม.ที่ผ่านมาถึง 72 ชม.ข้างหน้า</div>' : '');
+    + (!evs.length ? '<div style="color:var(--dim);font-family:var(--mono);font-size:12px">ยังไม่มีข่าวในช่วง 48 ชม.ที่ผ่านมาถึง 72 ชม.ข้างหน้า (เสาร์-อาทิตย์ตลาดปิด ปฏิทินว่างเป็นเรื่องปกติ)</div>' : '');
   el('newsmodal').classList.add('show');
 }
 
