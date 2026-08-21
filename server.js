@@ -356,6 +356,8 @@ function snapshotContext(sym) {
     e.t + ' ' + e.line + ' ' + e.type + (e.pts ? ' ' + f(e.pts) : '') + (e.running ? ' (running)' : '')
   ).join('\n');
   const compsOk = c.stackOk && c.emaOk && c.sarOk;
+  const tradeNotes = {};
+  for (const e of readTail('journal.jsonl', 1500)) if (e.pos) tradeNotes[e.pos] = { text: e.text, setup: e.setup || null };
   const state = compsOk
     ? (c.inZone100 ? (c.bounceConfirm ? 'READY (all checklist passed)' : 'IN ZONE - waiting bounce confirmation candle')
                    : 'ZONE WATCH - waiting pullback to WMA100')
@@ -407,7 +409,8 @@ function snapshotContext(sym) {
         (r.ctx && r.ctx.grade ? ' grade ' + r.ctx.grade : '') +
         (sys === null ? '' : sys ? ' [system entry]' : ' [off-system entry]') +
         (r.mfe != null ? ' mfe +' + r.mfe + ' mae -' + r.mae : '') +
-        (r.ctx && r.ctx.session ? ' ' + r.ctx.session : '');
+        (r.ctx && r.ctx.session ? ' ' + r.ctx.session : '') +
+        (tradeNotes[r.pos] ? ' | his note' + (tradeNotes[r.pos].setup ? ' (' + tradeNotes[r.pos].setup + ')' : '') + ': "' + String(tradeNotes[r.pos].text || '').slice(0, 150) + '"' : '');
     }).join('\n') || 'none recorded yet'),
     'GRADE RUBRIC (how this cockpit grades each trade at the moment of entry): confluence 0-100 = stack aligned +25, right side of EMA200 +10, SAR right side +15, in WMA100 zone +20 (near zone +10/+5), WMA100 bounce history today up to +15, PDH/PDL confluence +10, NEWS LOCK -25; grade A>=80 B>=65 C>=50 else D. IMPORTANT: grade measures alignment with the WMA+SAR system ONLY, not trade quality - his personal PA setups (PA+Market Structure, PA+Momentum) will normally read C/D and that is expected; never scold an off-system trade for being off-system, judge it by the setup named in his journal instead.',
     'TRADER JOURNAL (the trader\'s own notes; his personal setups like PA+Market Structure or PA+Momentum are separate techniques from this cockpit\'s WMA+SAR system - judge each entry against the setup it names, not against the system checklist):\n' + (readTail('journal.jsonl', 80).filter(e => !e.sym || e.sym === sym).slice(-10).map(e =>
@@ -1153,6 +1156,7 @@ app.post('/api/journal', (req, res) => {
   const c = b.ctx && typeof b.ctx === 'object' ? b.ctx : null;
   const entry = {
     at: Date.now(), sym: String(b.sym || '').slice(0, 12) || null, tag, setup: setup || null, text,
+    pos: b.pos != null ? String(b.pos).slice(0, 24) : null,
     ctx: c ? {
       bid: Number(c.bid) || null,
       state: String(c.state || '').slice(0, 90) || null,
@@ -1193,6 +1197,9 @@ function pairTrades(n) {
 app.get('/api/trades', (req, res) => {
   if (!pinOk(req)) return res.status(401).json({ ok: false, error: 'bad pin' });
   const rows = pairTrades(2000);
+  const notes = {};
+  for (const e of readTail('journal.jsonl', 1500)) if (e.pos) notes[e.pos] = { at: e.at, text: e.text, setup: e.setup || null, tag: e.tag };
+  for (const r of rows) if (notes[r.pos]) r.note = notes[r.pos];
   const day = req.query.day;
   const filt = day ? rows.filter(r => etDayKey(r.closeAt || r.openAt || 0) === day) : rows.slice(-80);
   res.json({ ok: true, trades: filt });
