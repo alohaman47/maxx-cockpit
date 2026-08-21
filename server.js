@@ -1113,7 +1113,7 @@ app.get('/api/news', (req, res) => {
   const sym = req.query.sym || Object.keys(snapshots)[0] || 'XAUUSD';
   const now = Date.now(), ccy = newsCcy(sym);
   const events = newsCache.events
-    .filter(e => ccy.has(e.ccy) && e.t > now - 12 * 3600000 && e.t < now + 72 * 3600000)
+    .filter(e => ccy.has(e.ccy) && e.t > now - 48 * 3600000 && e.t < now + 72 * 3600000)
     .sort((a, b) => a.t - b.t)
     .map(e => {
       const past = e.t <= now;
