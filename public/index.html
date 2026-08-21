@@ -102,6 +102,11 @@
   .tlsys{font-size:9.5px;font-family:var(--mono);padding:1px 6px;border-radius:6px;border:1px solid var(--line);color:var(--dim)}
   .tlsys.in{color:var(--buy);border-color:rgba(30,201,126,.45)}
   .tlgrade{font-size:9.5px;font-family:var(--mono);padding:1px 6px;border-radius:6px;border:1px solid var(--hair);color:var(--gold2)}
+  .tlnote{font-size:10px;font-family:var(--mono);background:none;border:1px dashed var(--line);color:var(--dim);padding:1px 8px;border-radius:6px;cursor:pointer}
+  .tlnotetext{width:100%;font-size:11.5px;color:var(--gold2);border-top:1px dashed rgba(36,41,56,.7);padding-top:5px;line-height:1.5}
+  .tlform{width:100%;border-top:1px dashed rgba(36,41,56,.7);padding-top:7px}
+  .tlform select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);font-family:var(--mono);font-size:11px;padding:5px;border-radius:7px;margin-bottom:6px}
+  .tlform textarea{width:100%;box-sizing:border-box;background:var(--panel2);border:1px solid var(--line);color:var(--text);font-size:12px;padding:7px;border-radius:8px;resize:vertical;font-family:inherit}
   .newschip.hot{color:#ffb3c0;border-color:rgba(240,80,106,.55)}
   .newslock{display:none;margin-bottom:14px;padding:12px 18px;border-radius:12px;border:1px solid rgba(240,80,106,.6);background:linear-gradient(90deg,rgba(240,80,106,.16),rgba(240,80,106,.03));color:#ff9fae;font-weight:700;letter-spacing:.05em;animation:pulse 1.8s infinite}
   .h1cell{display:flex;flex-direction:column;justify-content:center;gap:2px;padding:12px 16px;border-left:1px solid var(--line);flex-shrink:0}
@@ -961,7 +966,7 @@ function renderJournal(){
       + '<div class="jhead"><span style="color:'+t[2]+'">'+t[1]+'</span>'
       + (e.setup ? '<span class="jsetupb">'+esc(e.setup)+'</span>' : '')
       + '<span class="jtime">'+etTime(new Date(e.at))+' ET</span></div>'
-      + '<div class="jbody">'+esc(e.text).replace(/\n/g,'<br>')+'</div>'
+      + '<div class="jbody">'+(e.pos ? '<span style="font-family:var(--mono);font-size:9.5px;color:var(--dim)">[ไม้ #'+esc(e.pos)+'] </span>' : '')+esc(e.text).replace(/\n/g,'<br>')+'</div>'
       + (ctx ? '<div class="jctx">'+esc(ctx)+'</div>' : '') + '</div>';
   }).join('');
 }
@@ -1068,15 +1073,53 @@ function renderTrades(){
     if (r.openAt && r.closeAt) meta.push('ถือ ' + tHold(r));
     if (r.mfe != null) meta.push('MFE +' + r.mfe + ' / MAE -' + r.mae);
     if (r.ctx && r.ctx.session) meta.push(r.ctx.session);
+    var pid = String(r.pos || '').replace(/[^\w.-]/g, '');
     return '<div class="tlrow">'
       + '<span class="tldir ' + (r.dir === 'buy' ? 'buy' : 'sell') + '">' + String(r.dir || '?').toUpperCase() + '</span>'
       + '<span style="font-family:var(--mono);font-size:11px">' + (r.lot || '') + ' ' + esc(r.sym || '') + '</span>'
       + (r.ctx && r.ctx.grade ? '<span class="tlgrade">grade ' + esc(r.ctx.grade) + '</span>' : '')
       + (sys === null ? '' : '<span class="tlsys' + (sys ? ' in' : '') + '">' + (sys ? 'ตามระบบ' : 'นอกระบบ') + '</span>')
+      + (r.note && r.note.setup ? '<span class="jsetupb">' + esc(r.note.setup) + '</span>' : '')
+      + '<button class="tlnote" onclick="tNoteToggle(\'' + pid + '\')">' + (r.note ? 'แก้' : 'จด') + '</button>'
       + plHtml
       + (meta.length ? '<div class="tlmeta">' + esc(meta.join(' · ')) + '</div>' : '')
+      + (r.note ? '<div class="tlnotetext">' + esc(r.note.text) + '</div>' : '')
+      + '<div class="tlform" id="tlf_' + pid + '" style="display:none">'
+        + '<select id="tlfs_' + pid + '"></select>'
+        + '<textarea id="tlft_' + pid + '" rows="2" placeholder="ไม้นี้เข้าเพราะ…"></textarea>'
+        + '<button class="jsave" style="margin-top:5px" onclick="tNoteSave(\'' + pid + '\')">บันทึกโน้ตไม้นี้</button>'
+      + '</div>'
       + '</div>';
   }).join('');
+}
+function tNoteToggle(pid){
+  var f = el('tlf_' + pid);
+  if (!f) return;
+  var show = f.style.display === 'none';
+  f.style.display = show ? 'block' : 'none';
+  if (show){
+    var sel = el('tlfs_' + pid);
+    var row = S.tradelog.rows.filter(function(r){ return String(r.pos) === pid; })[0];
+    var cur = row && row.note && row.note.setup ? row.note.setup : '';
+    var opts = ['<option value="">setup: — ไม่ระบุ —</option>'];
+    S.journal.setups.forEach(function(s){ opts.push('<option value="'+esc(s)+'"'+(s===cur?' selected':'')+'>'+esc(s)+'</option>'); });
+    sel.innerHTML = opts.join('');
+    if (row && row.note) el('tlft_' + pid).value = row.note.text || '';
+    el('tlft_' + pid).focus();
+  }
+}
+async function tNoteSave(pid){
+  var text = el('tlft_' + pid).value.trim();
+  if (!text) return;
+  var row = S.tradelog.rows.filter(function(r){ return String(r.pos) === pid; })[0];
+  try {
+    var j = await jFetch('/api/journal', { method: 'POST', body: JSON.stringify({
+      sym: (row && row.sym) || S.active, tag: 'entry', pos: pid,
+      setup: el('tlfs_' + pid).value, text: text, ctx: null
+    })});
+    if (j.ok){ if (j.setups) S.journal.setups = j.setups; tLoad(); jLoad(); }
+    else alert(j.error || 'จดไม่สำเร็จ');
+  } catch(e){ alert('จดไม่สำเร็จ - ' + e.message); }
 }
 tLoad();
 async function aiSummary(){
