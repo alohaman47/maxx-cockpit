@@ -948,13 +948,13 @@ function jDayKeyET(off){
   return (S._jdf || (S._jdf = new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}))).format(new Date(Date.now() + off*86400000));
 }
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
-function renderSetups(keep){
-  var sel = el('jsetup');
+function setupOptions(keep){
   var opts = ['<option value="">setup: — ไม่ระบุ —</option>'];
   S.journal.setups.forEach(function(s){ opts.push('<option value="'+esc(s)+'"'+(s===keep?' selected':'')+'>'+esc(s)+'</option>'); });
   opts.push('<option value="__new__">+ เพิ่ม setup ใหม่…</option>');
-  sel.innerHTML = opts.join('');
+  return opts.join('');
 }
+function renderSetups(keep){ el('jsetup').innerHTML = setupOptions(keep); }
 function renderJournal(){
   el('jday').textContent = S.journal.dayOffset === 0 ? 'วันนี้' : jDayKeyET(S.journal.dayOffset);
   var rows = S.journal.entries;
@@ -1012,14 +1012,16 @@ async function jSave(){
   } catch(e){ alert('จดไม่สำเร็จ - ' + e.message); }
 }
 document.addEventListener('change', function(ev){
-  if (ev.target && ev.target.id === 'jsetup' && ev.target.value === '__new__'){
-    var name = prompt('ชื่อ setup ใหม่ เช่น PA + Order Block');
-    if (name && name.trim()){
-      name = name.trim().slice(0, 60);
-      if (S.journal.setups.indexOf(name) < 0) S.journal.setups.push(name);
-      renderSetups(name);
-    } else renderSetups('');
-  }
+  var t = ev.target;
+  if (!t || t.value !== '__new__') return;
+  if (t.id !== 'jsetup' && t.id.indexOf('tlfs_') !== 0) return;
+  var name = prompt('ชื่อ setup/เหตุผลใหม่ เช่น FOMO, PA + Order Block');
+  if (name && name.trim()){
+    name = name.trim().slice(0, 60);
+    if (S.journal.setups.indexOf(name) < 0) S.journal.setups.push(name);
+    t.innerHTML = setupOptions(name);
+    if (t.id !== 'jsetup') renderSetups(el('jsetup').value); else t.value = name;
+  } else t.innerHTML = setupOptions('');
 });
 renderJTags(); renderSetups(''); jLoad();
 
@@ -1101,9 +1103,7 @@ function tNoteToggle(pid){
     var sel = el('tlfs_' + pid);
     var row = S.tradelog.rows.filter(function(r){ return String(r.pos) === pid; })[0];
     var cur = row && row.note && row.note.setup ? row.note.setup : '';
-    var opts = ['<option value="">setup: — ไม่ระบุ —</option>'];
-    S.journal.setups.forEach(function(s){ opts.push('<option value="'+esc(s)+'"'+(s===cur?' selected':'')+'>'+esc(s)+'</option>'); });
-    sel.innerHTML = opts.join('');
+    sel.innerHTML = setupOptions(cur);
     if (row && row.note) el('tlft_' + pid).value = row.note.text || '';
     el('tlft_' + pid).focus();
   }
