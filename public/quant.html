@@ -113,6 +113,13 @@
 
 <div class="grid" style="margin-top:14px">
   <div class="panel" style="grid-column:1/-1">
+    <div class="ptitle">เทคนิค #2 — WMA BAND 87-100 (forward test จากสัญญาณจำลอง)</div>
+    <div id="aiobox"></div>
+  </div>
+</div>
+
+<div class="grid" style="margin-top:14px">
+  <div class="panel" style="grid-column:1/-1">
     <div class="ptitle">Fund Charter — กติกาตัดสินชะตา<span class="lockbadge">LOCKED จนถึงวันตัดสิน</span></div>
     <div id="charterbox"></div>
   </div>
@@ -147,7 +154,43 @@ function renderSel(){
 function setSym(s){ Q.sym = s; renderSel(); load(); }
 function setDays(d){ Q.days = d; renderSel(); load(); }
 
+function aggRow(name, a, hi){
+  if (!a || !a.n) return '';
+  return '<tr' + (hi ? ' style="color:#e9d08a"' : '') + '><td>' + name + '</td><td>' + a.n + '</td><td>' + (a.winRate != null ? a.winRate + '%' : '-') + '</td>'
+    + '<td style="color:' + (a.avgR >= 0 ? 'var(--buy)' : 'var(--sell)') + '">' + a.avgR + '</td>'
+    + '<td>' + (a.sumR != null ? a.sumR : '-') + '</td><td>' + (a.pf != null ? a.pf : '-') + '</td></tr>';
+}
+async function loadAio(){
+  var box = el('aiobox');
+  try {
+    var j = await (await fetch('/api/aio?sym=' + encodeURIComponent(Q.sym) + '&days=' + Q.days)).json();
+    if (!j.ok) return;
+    var s = j.stats;
+    if (!s.all || !s.all.n){
+      box.innerHTML = '<div style="color:var(--dim);font-size:12px">ยังไม่มีผลสัญญาณจำลองใน ' + Q.days + ' วันนี้ — ระบบเก็บอัตโนมัติทุกการแตะแถบ (ทั้งผ่านและโดนบล็อกฟิลเตอร์) เริ่มนับตั้งแต่ EA v0.71 ติดตั้ง</div>';
+      return;
+    }
+    var h = '<table><tr><th>ชุด</th><th>n</th><th>ชนะ</th><th>avgR</th><th>รวม R</th><th>PF</th></tr>';
+    h += aggRow('ทั้งหมด', s.all, false);
+    h += aggRow('ผ่านฟิลเตอร์ (ไม้ที่ระบบให้เข้า)', s.passed, true);
+    h += aggRow('โดนบล็อก (เก็บเทียบ — พิสูจน์ฟิลเตอร์)', s.blocked, false);
+    if (s.byPat){
+      h += aggRow('แท่งปิดสวย', s.byPat.strong, false);
+      h += aggRow('แท่งธรรมดา', s.byPat.plain, false);
+      h += aggRow('แท่งปิดแย่', s.byPat.risk, false);
+    }
+    h += '</table>';
+    var sess = s.bySession || {}, parts = [];
+    ['ASIA','LONDON','NY','OFF'].forEach(function(k){
+      if (sess[k] && sess[k].n) parts.push(k + ': avgR ' + sess[k].avgR + ' (n=' + sess[k].n + ')');
+    });
+    if (parts.length) h += '<div style="font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:8px">แยก session — ' + parts.join(' · ') + '</div>';
+    h += '<div style="font-family:var(--mono);font-size:10.5px;color:var(--dim);margin-top:6px">เป้าจาก backtest ของนาย: unfiltered avgR +0.21 · H4+D1 +0.30 PF 1.52 — ถ้า forward วิ่งใกล้เคียง = edge จริง / ถ้าห่างมาก = ระวัง curve fit</div>';
+    box.innerHTML = h;
+  } catch(e){ box.innerHTML = '<div style="color:var(--dim);font-size:12px">โหลดข้อมูลเทคนิค #2 ไม่ได้</div>'; }
+}
 async function load(){
+  loadAio();
   var q;
   try { q = await (await fetch('/api/quant?sym=' + encodeURIComponent(Q.sym) + '&days=' + Q.days)).json(); }
   catch(e){ el('warn').style.display = 'block'; el('warn').textContent = 'โหลดข้อมูลไม่ได้: ' + e.message; return; }
