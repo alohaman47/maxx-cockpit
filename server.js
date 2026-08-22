@@ -636,6 +636,101 @@ function aioNow(sym) {
     h4: snap.h4 ? (snap.h4.biasBuy ? 1 : -1) : 0,
     d1: (snap.aioD1 && typeof snap.aioD1.bias === 'number') ? snap.aioD1.bias : null };
 }
+// ---------- RESEARCH DESK (book #12: hypo.jsonl) ----------
+// Kimi proposes ONE machine-testable hypothesis; the server tests it against real books;
+// forward performance (rows AFTER proposal time only) is the only judge - anti curve-fit by design.
+const HYPO_FIELDS = {
+  events: ['line', 'session', 'biasBuy', 'sarUp', 'gradeMin', 'newsNear'],
+  aio: ['session', 'pat', 'pass', 'dir']
+};
+function hypoEventStats(rows) {
+  const b = rows.filter(e => e.type === 'bounce'), x = rows.filter(e => e.type === 'break');
+  const n = b.length + x.length;
+  if (!n) return { n: 0 };
+  const hold = b.length / n;
+  const avgB = b.length ? b.reduce((a, e) => a + e.pts, 0) / b.length : 0;
+  const avgX = x.length ? x.reduce((a, e) => a + e.pts, 0) / x.length : 0;
+  return { n, holdRate: Math.round(hold * 100), avgBounce: +avgB.toFixed(2), avgBreak: +avgX.toFixed(2),
+    expectancy: +(hold * avgB - (1 - hold) * avgX).toFixed(2) };
+}
+function hypoAioStats(rows) {
+  const n = rows.length;
+  if (!n) return { n: 0 };
+  const sum = rows.reduce((a, e) => a + e.r, 0), wins = rows.filter(e => e.r > 0);
+  const loss = rows.filter(e => e.r < 0).reduce((a, e) => a + e.r, 0);
+  return { n, winRate: Math.round(wins.length / n * 100), avgR: +(sum / n).toFixed(3), sumR: +sum.toFixed(1),
+    pf: loss < 0 ? +(wins.reduce((a, e) => a + e.r, 0) / Math.abs(loss)).toFixed(2) : null };
+}
+function hypoMatch(base, cond, e) {
+  if (base === 'events') {
+    if (cond.line && e.line !== cond.line) return false;
+    if (cond.session && (e.ts ? sessOf(e.ts) : null) !== cond.session) return false;
+    if (typeof cond.biasBuy === 'boolean' && !!(e.ctx && e.ctx.biasBuy) !== cond.biasBuy) return false;
+    if (typeof cond.sarUp === 'boolean' && !!(e.ctx && e.ctx.sarUp) !== cond.sarUp) return false;
+    if (cond.gradeMin) {
+      const c = e.ctx ? e.ctx.conf : null, min = cond.gradeMin === 'A' ? 80 : cond.gradeMin === 'B' ? 65 : 50;
+      if (c == null || c < min) return false;
+    }
+    if (typeof cond.newsNear === 'boolean') {
+      const nm = e.ctx ? e.ctx.newsMin : null;
+      if ((nm != null && Math.abs(nm) <= 30) !== cond.newsNear) return false;
+    }
+    return true;
+  }
+  if (cond.session && e.session !== cond.session) return false;
+  if (cond.pat && e.pat !== cond.pat) return false;
+  if (typeof cond.pass === 'boolean' && !!e.pass !== cond.pass) return false;
+  if (cond.dir && e.dir !== cond.dir) return false;
+  return true;
+}
+function hypoTest(sym, base, cond, sinceMs) {
+  let rows;
+  if (base === 'aio') rows = readTail('aio.jsonl', 8000).filter(e => e.sym === sym && e.kind === 'result');
+  else rows = readTail('events.jsonl', 8000).filter(e => e.sym === sym && (e.type === 'bounce' || e.type === 'break'));
+  if (sinceMs) rows = rows.filter(e => e.at > sinceMs);
+  const agg = base === 'aio' ? hypoAioStats : hypoEventStats;
+  return { match: agg(rows.filter(e => hypoMatch(base, cond, e))), rest: agg(rows.filter(e => !hypoMatch(base, cond, e))) };
+}
+app.post('/api/research/propose', async (req, res) => {
+  if (!pinOk(req)) return res.status(401).json({ ok: false, error: 'bad pin' });
+  if (!KIMI_KEY) return res.status(400).json({ ok: false, error: 'AI not configured' });
+  if (!aiRateOk()) return res.status(429).json({ ok: false, error: 'AI rate limit reached' });
+  const sym = (req.body && req.body.sym) || 'XAUUSD';
+  const prior = readTail('hypo.jsonl', 100).filter(h => h.sym === sym).slice(-8).map(h => h.title).join(' | ') || 'none';
+  const digest = 'RECORDED STATS (30d):\n' + statsText(sym, 30) + '\nBAND TECHNIQUE #2 STATS: ' + JSON.stringify(aioStats(sym, 30));
+  const prompt = 'You are the research analyst of this trading desk. Study the recorded statistics below and propose EXACTLY ONE testable hypothesis that might reveal a better sub-edge.\n'
+    + 'Respond with STRICT JSON ONLY, no prose, no markdown fences:\n'
+    + '{"title":"<short Thai title>","base":"events"|"aio","cond":{...},"rationale":"<1-2 Thai sentences: what in the data made you suspect this>"}\n'
+    + 'cond rules: 1 to 3 keys MAX (more = overfitting, rejected). Allowed keys for base "events" (WMA line touches): line (WMA50|WMA89|WMA100|WMA144|EMA200|WMA800), session (ASIA|LONDON|NY|OFF), biasBuy (true|false), sarUp (true|false), gradeMin (A|B|C), newsNear (true|false = within 30min of high-impact news). Allowed keys for base "aio" (band technique #2 simulated results): session, pat (strong|plain|risk), pass (true|false), dir (1|-1).\n'
+    + 'Avoid repeating these already-proposed hypotheses: ' + prior + '\n\n' + digest;
+  try {
+    let text = await askKimi([
+      { role: 'system', content: 'You output strict JSON only. Never add explanations outside the JSON.' },
+      { role: 'user', content: prompt }
+    ], 1200);
+    text = text.replace(/```json|```/g, '').trim();
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('no JSON in AI reply');
+    const h = JSON.parse(m[0]);
+    if (h.base !== 'events' && h.base !== 'aio') throw new Error('bad base');
+    const keys = Object.keys(h.cond || {});
+    if (keys.length < 1 || keys.length > 3) throw new Error('cond must have 1-3 keys');
+    for (const k of keys) if (!HYPO_FIELDS[h.base].includes(k)) throw new Error('field not allowed: ' + k);
+    const test = hypoTest(sym, h.base, h.cond, null);
+    const rec = { at: Date.now(), sym, title: String(h.title || '').slice(0, 120), base: h.base, cond: h.cond,
+      rationale: String(h.rationale || '').slice(0, 400), insample: test };
+    logAppend('hypo.jsonl', rec);
+    res.json({ ok: true, hypo: rec });
+  } catch (e) { noteAiError(e.message); res.status(502).json({ ok: false, error: e.message }); }
+});
+app.get('/api/research', (req, res) => {
+  if (!pinOk(req)) return res.status(401).json({ ok: false, error: 'bad pin' });
+  const sym = req.query.sym || 'XAUUSD';
+  const list = readTail('hypo.jsonl', 200).filter(h => h.sym === sym).slice(-20).reverse();
+  for (const h of list) h.forward = hypoTest(sym, h.base, h.cond, h.at);
+  res.json({ ok: true, hypos: list });
+});
+
 app.get('/api/aio', (req, res) => {
   const sym = req.query.sym || 'XAUUSD';
   const days = Math.min(90, Math.max(1, parseInt(req.query.days || '30', 10)));
@@ -1110,7 +1205,7 @@ app.get('/api/system', (req, res) => {
   for (const sym of Object.keys(snapshots))
     feeds[sym] = { ageSec: Math.round((Date.now() - snapshots[sym].at) / 1000) };
   const files = {};
-  for (const f of ['events.jsonl', 'sar.jsonl', 'bias.jsonl', 'structure.jsonl', 'trades.jsonl', 'health.jsonl', 'journal.jsonl', 'aio.jsonl']) {
+  for (const f of ['events.jsonl', 'sar.jsonl', 'bias.jsonl', 'structure.jsonl', 'trades.jsonl', 'health.jsonl', 'journal.jsonl', 'aio.jsonl', 'hypo.jsonl']) {
     try { files[f] = +(fs.statSync(path.join(DATA_DIR, f)).size / 1024).toFixed(1); }
     catch (e) { files[f] = 0; }
   }
