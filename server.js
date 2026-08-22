@@ -412,6 +412,11 @@ function snapshotContext(sym) {
         (r.ctx && r.ctx.session ? ' ' + r.ctx.session : '') +
         (tradeNotes[r.pos] ? ' | his note' + (tradeNotes[r.pos].setup ? ' (' + tradeNotes[r.pos].setup + ')' : '') + ': "' + String(tradeNotes[r.pos].text || '').slice(0, 150) + '"' : '');
     }).join('\n') || 'none recorded yet'),
+    'AIO BAND TECHNIQUE #2 LIVE STATE: ' + (function(){ const nw = aioNow(sym); if (!nw) return 'no band data yet';
+      return 'band ' + nw.lower + '-' + nw.upper + ', price ' + nw.pos + ' band' +
+        (nw.armed ? ', ARMED for ' + nw.armed.toUpperCase() + ' on next touch' : ', not armed (needs 5 clean bars outside)') +
+        ', H4 bias ' + (nw.h4 === 1 ? 'BUY' : nw.h4 === -1 ? 'SELL' : '-') +
+        ', D1 daily bias ' + (nw.d1 === 1 ? 'BUY' : nw.d1 === -1 ? 'SELL' : nw.d1 === 0 ? 'NEUTRAL (all its signals blocked today)' : 'n/a'); })(),
     'AIO BAND TECHNIQUE #2 (parallel test system from his own backtest: WMA87-100 band touch after >=5 bars clean outside, SL opposite band edge +-0.25 ATR, TP 2R, 40-bar horizon, H4-bias filter; both passed and blocked signals are forward-logged): last 30d ' + (function(){ const s = aioStats(sym, 30); if (!s.all.n) return 'no results yet - collecting'; return s.all.n + ' signals, win ' + s.all.winRate + '%, avgR ' + s.all.avgR + (s.all.pf ? ', PF ' + s.all.pf : '') + ' | passed-filter: ' + (s.passed.n ? s.passed.n + ' avgR ' + s.passed.avgR : 'none') + ' | blocked: ' + (s.blocked.n ? s.blocked.n + ' avgR ' + s.blocked.avgR : 'none'); })(),
     'GRADE RUBRIC (how this cockpit grades each trade at the moment of entry): confluence 0-100 = stack aligned +25, right side of EMA200 +10, SAR right side +15, in WMA100 zone +20 (near zone +10/+5), WMA100 bounce history today up to +15, PDH/PDL confluence +10, NEWS LOCK -25; grade A>=80 B>=65 C>=50 else D. IMPORTANT: grade measures alignment with the WMA+SAR system ONLY, not trade quality - his personal PA setups (PA+Market Structure, PA+Momentum) will normally read C/D and that is expected; never scold an off-system trade for being off-system, judge it by the setup named in his journal instead.',
     'TRADER JOURNAL (the trader\'s own notes; his personal setups like PA+Market Structure or PA+Momentum are separate techniques from this cockpit\'s WMA+SAR system - judge each entry against the setup it names, not against the system checklist):\n' + (readTail('journal.jsonl', 80).filter(e => !e.sym || e.sym === sym).slice(-10).map(e =>
@@ -610,27 +615,30 @@ function aioStats(sym, days) {
     byPat: { strong: agg(res.filter(e => e.pat === 'strong')), plain: agg(res.filter(e => e.pat === 'plain')), risk: agg(res.filter(e => e.pat === 'risk')) },
     bySession: sessOut };
 }
+function aioNow(sym) {
+  const snap = snapshots[sym] && snapshots[sym].data;
+  if (!(snap && snap.bars && snap.bars.length > AIO_CFG.slow + AIO_CFG.minAway && snap.bars[snap.bars.length - 1].length >= 5)) return null;
+  const bars = snap.bars, n = bars.length, closes = bars.map(b => b[4]);
+  const wf = wmaArr(closes, AIO_CFG.fast), ws = wmaArr(closes, AIO_CFG.slow);
+  const up = Math.max(wf[n - 1], ws[n - 1]), lo = Math.min(wf[n - 1], ws[n - 1]);
+  let above = true, below = true;
+  for (let k = n - AIO_CFG.minAway; k < n; k++) {
+    const u = Math.max(wf[k], ws[k]), l = Math.min(wf[k], ws[k]);
+    if (closes[k] - u <= 0) above = false;
+    if (closes[k] - l >= 0) below = false;
+  }
+  return { upper: +up.toFixed(2), lower: +lo.toFixed(2),
+    pos: snap.bid > up ? 'above' : snap.bid < lo ? 'below' : 'inside',
+    armed: above ? 'buy' : below ? 'sell' : null,
+    h4: snap.h4 ? (snap.h4.biasBuy ? 1 : -1) : 0,
+    d1: (snap.aioD1 && typeof snap.aioD1.bias === 'number') ? snap.aioD1.bias : null };
+}
 app.get('/api/aio', (req, res) => {
   const sym = req.query.sym || 'XAUUSD';
   const days = Math.min(90, Math.max(1, parseInt(req.query.days || '30', 10)));
   const out = aioStats(sym, days);
-  const snap = snapshots[sym] && snapshots[sym].data;
-  if (snap && snap.bars && snap.bars.length > AIO_CFG.slow + AIO_CFG.minAway && snap.bars[snap.bars.length - 1].length >= 5) {
-    const bars = snap.bars, n = bars.length, closes = bars.map(b => b[4]);
-    const wf = wmaArr(closes, AIO_CFG.fast), ws = wmaArr(closes, AIO_CFG.slow);
-    const up = Math.max(wf[n - 1], ws[n - 1]), lo = Math.min(wf[n - 1], ws[n - 1]);
-    let above = true, below = true;
-    for (let k = n - AIO_CFG.minAway; k < n; k++) {
-      const u = Math.max(wf[k], ws[k]), l = Math.min(wf[k], ws[k]);
-      if (closes[k] - u <= 0) above = false;
-      if (closes[k] - l >= 0) below = false;
-    }
-    out.now = { upper: +up.toFixed(2), lower: +lo.toFixed(2),
-      pos: snap.bid > up ? 'above' : snap.bid < lo ? 'below' : 'inside',
-      armed: above ? 'buy' : below ? 'sell' : null,
-      h4: snap.h4 ? (snap.h4.biasBuy ? 1 : -1) : 0,
-      d1: (snap.aioD1 && typeof snap.aioD1.bias === 'number') ? snap.aioD1.bias : null };
-  }
+  const nw = aioNow(sym);
+  if (nw) out.now = nw;
   res.json({ ok: true, days, stats: out });
 });
 
