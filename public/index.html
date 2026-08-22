@@ -92,6 +92,9 @@
   .jbody{font-size:12.5px;margin-top:3px;line-height:1.5}
   .jctx{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:3px}
   .jempty{color:var(--dim);font-size:11.5px;text-align:center;padding:10px 0}
+  .aionow{font-family:var(--mono);font-size:11.5px;color:var(--text);margin-bottom:8px;line-height:1.7}
+  .aiostat{font-family:var(--mono);font-size:10.5px;color:var(--dim);line-height:1.8;border-top:1px solid rgba(36,41,56,.6);padding-top:8px}
+  .aiostat b{color:var(--gold2)}
   .tlsum{font-family:var(--mono);font-size:11px;color:var(--gold2);margin-bottom:8px}
   .tlrow{display:flex;align-items:center;gap:10px;padding:7px 9px;background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-bottom:6px;font-size:12px;flex-wrap:wrap}
   .tldir{font-family:var(--mono);font-weight:800;font-size:11px;padding:2px 7px;border-radius:6px}
@@ -360,6 +363,11 @@
       <div id="riskbox"></div>
     </div>
     <div class="panel">
+      <div class="ptitle">WMA BAND — เทคนิคทดสอบ #2</div>
+      <div class="aionow" id="aionow">รอข้อมูล…</div>
+      <div class="aiostat" id="aiostat"></div>
+    </div>
+    <div class="panel">
       <div class="ptitle">Signal Feed</div>
       <div class="feed" id="feed"></div>
     </div>
@@ -477,6 +485,37 @@ async function loadQuant(){
   } catch(e){}
 }
 setInterval(loadQuant, 5 * 60000);
+async function loadAio(){
+  if (!S.active) return;
+  try {
+    var r = await fetch('/api/aio?sym=' + encodeURIComponent(S.active) + '&days=30');
+    if (!r.ok) return;
+    var j = await r.json();
+    if (!j.ok) return;
+    var st = j.stats, nowEl = el('aionow'), stEl = el('aiostat');
+    if (st.now){
+      var posTxt = st.now.pos === 'above' ? 'เหนือแถบ' : st.now.pos === 'below' ? 'ใต้แถบ' : 'ในแถบ';
+      var armTxt = st.now.armed === 'buy' ? ' · <span style="color:var(--buy)">รอแตะจากบน = สัญญาณ BUY</span>'
+                 : st.now.armed === 'sell' ? ' · <span style="color:var(--sell)">รอแตะจากล่าง = สัญญาณ SELL</span>' : '';
+      var h4Txt = st.now.h4 === 1 ? '<span style="color:var(--buy)">BUY</span>' : st.now.h4 === -1 ? '<span style="color:var(--sell)">SELL</span>' : '—';
+      nowEl.innerHTML = 'แถบ ' + fmt(st.now.lower, 2) + ' – ' + fmt(st.now.upper, 2)
+        + '<br>ราคา<b>' + posTxt + '</b>' + armTxt + '<br>ฟิลเตอร์ H4: ' + h4Txt;
+    } else nowEl.textContent = 'รอข้อมูล bars จาก EA…';
+    var a = st.all || {};
+    if (!a.n){ stEl.innerHTML = 'ยังไม่มีผลไม้จำลอง — ระบบกำลังเก็บทุกสัญญาณแตะแถบ (ทั้งผ่าน/โดนบล็อก) อัตโนมัติ'; }
+    else {
+      var line1 = '30 วัน: <b>' + a.n + ' สัญญาณ</b> · ชนะ ' + a.winRate + '% · avgR <b>' + a.avgR + '</b>' + (a.pf ? ' · PF ' + a.pf : '');
+      var p = st.passed || {}, b = st.blocked || {};
+      var line2 = 'ผ่านฟิลเตอร์: ' + (p.n ? p.n + ' ไม้ avgR <b>' + p.avgR + '</b>' : '—')
+        + ' · โดนบล็อก: ' + (b.n ? b.n + ' ไม้ avgR ' + b.avgR : '—');
+      var pt = st.byPat || {}, s3 = [];
+      if (pt.strong && pt.strong.n) s3.push('ปิดสวย ' + pt.strong.n + ' avgR ' + pt.strong.avgR);
+      if (pt.risk && pt.risk.n) s3.push('ปิดแย่ ' + pt.risk.n + ' avgR ' + pt.risk.avgR);
+      stEl.innerHTML = line1 + '<br>' + line2 + (s3.length ? '<br>' + s3.join(' · ') : '');
+    }
+  } catch(e){}
+}
+setInterval(loadAio, 5 * 60000);
 // trading-day open (Pepperstone day starts 17:00 ET = NY close): trading-day id = ET date of (ts + 7h)
 function dayOpenFromBars(d){
   if (!d.bars || d.bars.length < 2) return null;
@@ -554,6 +593,11 @@ es.onmessage = function(e){
     if (m.sym === S.active) render();
     return;
   }
+  if (m.type === 'aio'){
+    pushFeed(m.sym, m.pass ? 'i' : 'tr', String(m.txt).replace(/</g,'&lt;'));
+    if (m.sym === S.active){ render(); loadAio(); }
+    return;
+  }
   if (m.type === 'trade'){
     pushFeed(m.sym, m.pl > 0 ? 'b' : (m.pl < 0 ? 's' : 'tr'), String(m.txt).replace(/</g,'&lt;'));
     if (m.sym === S.active) render();
@@ -562,7 +606,7 @@ es.onmessage = function(e){
   }
   S.symbols[m.sym] = { data: m.data, at: Date.now() };
   detect(m.sym, m.data);
-  if (!S.active){ S.active = m.sym; loadNews(); loadQuant(); }
+  if (!S.active){ S.active = m.sym; loadNews(); loadQuant(); loadAio(); }
   renderTabs();
   if (m.sym === S.active) render();
 };
@@ -575,7 +619,7 @@ function renderTabs(){
     return '<button class="symtab'+(s===S.active?' active':'')+'" onclick="setSym(\''+s+'\')">'+s+'</button>';
   }).join('');
 }
-function setSym(s){ S.active = s; renderTabs(); render(); renderChat(); loadNews(); loadQuant(); }
+function setSym(s){ S.active = s; renderTabs(); render(); renderChat(); loadNews(); loadQuant(); loadAio(); }
 
 // ---- stale watchdog ----
 setInterval(function(){
