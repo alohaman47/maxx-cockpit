@@ -517,6 +517,8 @@ function aioProcess(sym, d) {
     const n = bars.length, closes = bars.map(b => b[4]);
     const wf = wmaArr(closes, AIO_CFG.fast), ws = wmaArr(closes, AIO_CFG.slow), atr = atrArr(bars, AIO_CFG.atrLen);
     const H4 = d.h4 ? (d.h4.biasBuy ? 1 : -1) : 0;
+    const D1 = (d.aioD1 && typeof d.aioD1.bias === 'number') ? d.aioD1.bias : null;
+    const filt = D1 === null ? 'H4' : 'H4+D1';
     const setups = [];
     let lastEvIdx = -Infinity;
     for (let i = AIO_CFG.slow + AIO_CFG.minAway; i < n; i++) {
@@ -543,7 +545,7 @@ function aioProcess(sym, d) {
       const pen = dir === 1 ? (up - bars[i][3]) / width : (bars[i][2] - lo) / width;
       const cloc = dir === 1 ? (closes[i] - bars[i][3]) / rng : (bars[i][2] - closes[i]) / rng;
       const pat = (pen < 0.5 && cloc >= 0.6) ? 'strong' : (pen > 1.0 && cloc < 0.3) ? 'risk' : 'plain';
-      const pass = H4 !== 0 && H4 === dir;
+      const pass = D1 === null ? (H4 !== 0 && H4 === dir) : (H4 === dir && D1 === dir);
       setups.push({ i, ts: bars[i][0], dir, eP, slP, tpP, risk, pat, pass });
     }
     for (const s of setups) {
@@ -563,7 +565,7 @@ function aioProcess(sym, d) {
         AIO.logged.add(kSet);
         logAppend('aio.jsonl', { at: Date.now(), key: kSet, kind: 'setup', sym, ts: s.ts, dir: s.dir,
           entry: +s.eP.toFixed(2), sl: +s.slP.toFixed(2), tp: +s.tpP.toFixed(2), risk: +s.risk.toFixed(2),
-          pat: s.pat, pass: s.pass, h4: H4, session: sessOf(s.ts) });
+          pat: s.pat, pass: s.pass, h4: H4, d1: D1, filt, session: sessOf(s.ts) });
         if (s.ts === lastTs) {
           broadcast({ type: 'aio', sym, pass: s.pass, txt: 'WMA BAND #2: แตะแถบ ' + (s.dir === 1 ? 'จากบน (BUY)' : 'จากล่าง (SELL)')
             + ' @' + s.eP.toFixed(2) + ' SL ' + s.slP.toFixed(2) + ' TP ' + s.tpP.toFixed(2)
@@ -576,7 +578,7 @@ function aioProcess(sym, d) {
         if (!AIO.logged.has(kRes)) {
           AIO.logged.add(kRes);
           logAppend('aio.jsonl', { at: Date.now(), key: kRes, kind: 'result', sym, ts: s.ts, endTs: bars[endIdx][0],
-            dir: s.dir, r: +outcome.toFixed(3), exit: exitReason, pat: s.pat, pass: s.pass, h4: H4,
+            dir: s.dir, r: +outcome.toFixed(3), exit: exitReason, pat: s.pat, pass: s.pass, h4: H4, d1: D1, filt,
             session: sessOf(s.ts), bars: endIdx - s.i });
           if (bars[endIdx][0] === lastTs) {
             broadcast({ type: 'aio', sym, pass: s.pass, txt: 'WMA BAND #2: จบไม้ ' + (s.dir === 1 ? 'BUY' : 'SELL')
@@ -626,7 +628,8 @@ app.get('/api/aio', (req, res) => {
     out.now = { upper: +up.toFixed(2), lower: +lo.toFixed(2),
       pos: snap.bid > up ? 'above' : snap.bid < lo ? 'below' : 'inside',
       armed: above ? 'buy' : below ? 'sell' : null,
-      h4: snap.h4 ? (snap.h4.biasBuy ? 1 : -1) : 0 };
+      h4: snap.h4 ? (snap.h4.biasBuy ? 1 : -1) : 0,
+      d1: (snap.aioD1 && typeof snap.aioD1.bias === 'number') ? snap.aioD1.bias : null };
   }
   res.json({ ok: true, days, stats: out });
 });
