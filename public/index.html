@@ -441,7 +441,9 @@ var LINE_META = {
   EMA200: {color:'#9aa4b5',       dashed:true},
   WMA800: {color:'var(--wma800)', dashed:true},
   PDH:    {color:'#e08090',       dashed:true},
-  PDL:    {color:'#79d9a8',       dashed:true}
+  PDL:    {color:'#79d9a8',       dashed:true},
+  'BAND#2 บน':  {color:'#B8A476', dashed:true, band2:true},
+  'BAND#2 ล่าง': {color:'#B8A476', dashed:true, band2:true}
 };
 var S = { symbols:{}, active:null, feed:{}, prev:{}, sound:false, lastBeep:0, audio:null };
 
@@ -762,6 +764,8 @@ function render(){
   // ladder: sort lines + insert price
   var rows = Object.keys(d.lines).map(function(nm){ return {nm:nm, v:d.lines[nm]}; });
   if (d.pd && d.pd.h){ rows.push({nm:'PDH', v:d.pd.h}); rows.push({nm:'PDL', v:d.pd.l}); }
+  var aioB = aioBandCalc(d);
+  if (aioB){ rows.push({nm:'BAND#2 บน', v:aioB.upper}); rows.push({nm:'BAND#2 ล่าง', v:aioB.lower}); }
   rows.sort(function(a,b){ return b.v - a.v; });
   var html = '', priceDone = false;
   rows.forEach(function(r){
@@ -769,15 +773,18 @@ function render(){
       html += '<div class="pricebar">PRICE '+fmt(d.bid,dg)+'</div>'; priceDone = true;
     }
     var meta = LINE_META[r.nm] || {color:'var(--dim)'};
-    var evs = (d.events||[]).filter(function(ev){ return ev.line===r.nm && ev.type!=='testing'; }).slice(0,3);
     var dots = '';
-    for (var i=0;i<3;i++){
-      var c = evs[i] ? (evs[i].type==='bounce' ? 'b' : 'x') : '';
-      dots += '<i class="f '+c+'"></i>';
+    if (!meta.band2){
+      var evs = (d.events||[]).filter(function(ev){ return ev.line===r.nm && ev.type!=='testing'; }).slice(0,3);
+      for (var i=0;i<3;i++){
+        var c = evs[i] ? (evs[i].type==='bounce' ? 'b' : 'x') : '';
+        dots += '<i class="f '+c+'"></i>';
+      }
     }
     html += '<div class="rung'+(meta.dashed?' dashed':'')+(meta.main?' main':'')+'" style="border-left-color:'+meta.color+'">'
          + '<span class="nm" style="color:'+meta.color+'">'+r.nm.replace('WMA','WMA ').replace('EMA','EMA ')+'</span>'
          + (meta.main?'<span class="badge">เส้นหลัก</span>':'')
+         + (meta.band2?'<span class="badge" style="background:rgba(184,164,118,.15);color:#B8A476;border:1px solid rgba(184,164,118,.4)">เทคนิค #2</span>':'')
          + '<span class="form">'+dots+'</span>'
          + '<span class="val">'+fmt(r.v,dg)+'</span></div>';
   });
