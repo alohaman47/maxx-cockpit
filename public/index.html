@@ -405,7 +405,7 @@
       <button class="jsave" onclick="jSave()">จดบันทึก</button>
       <div class="jnav"><button onclick="jDay(-1)">◀</button><span id="jday"></span><button onclick="jDay(1)">▶</button></div>
       <div class="jlist" id="jlist"></div>
-      <div class="footer">MAXX COCKPIT v2.3.3 · live · กดออเดอร์จริงใน MT5</div>
+      <div class="footer">MAXX COCKPIT v2.4 · live · กดออเดอร์จริงใน MT5</div>
     </div>
   </div>
 </div>
@@ -492,13 +492,15 @@ function renderAioHalf(d, dg){
     var entry = dir === 1 ? a.upper : a.lower;
     var sl = dir === 1 ? a.lower - buf : a.upper + buf;
     var risk = Math.abs(entry - sl), tp = entry + dir * 2 * risk;
-    var passH4 = h4 !== 0 && h4 === dir;
+    var d1 = (d.aioD1 && typeof d.aioD1.bias === 'number') ? d.aioD1.bias : null;
+    var passH4 = d1 === null ? (h4 !== 0 && h4 === dir) : (h4 === dir && d1 === dir);
+    var filtName = d1 === null ? 'H4' : 'H4+D1';
     st.textContent = dir === 1 ? 'ARMED — รอแตะ BUY' : 'ARMED — รอแตะ SELL';
     st.style.color = dir === 1 ? 'var(--buy)' : 'var(--sell)';
     el('aiosub2').textContent = 'นอกแถบสะอาดครบ ' + 5 + ' แท่ง — แตะแถบเมื่อไหร่ = สัญญาณ';
     el('aioband2').innerHTML = 'แถบ ' + fmt(a.lower, dg) + ' – ' + fmt(a.upper, dg) + ' · ราคาห่างขอบ ' + fmt(distEdge, dg) + ' pts';
     el('aioplan2').innerHTML = 'entry ' + fmt(entry, dg) + ' · SL ' + fmt(sl, dg) + ' · TP(2R) ' + fmt(tp, dg)
-      + '<br>ฟิลเตอร์ H4: ' + (passH4 ? '<span style="color:var(--buy)">ผ่าน</span>' : '<span style="color:var(--sell)">ขัด — สัญญาณจะโดนบล็อก (เก็บสถิติอย่างเดียว)</span>');
+      + '<br>ฟิลเตอร์ ' + filtName + ': ' + (passH4 ? '<span style="color:var(--buy)">ผ่าน</span>' : '<span style="color:var(--sell)">ขัด — สัญญาณจะโดนบล็อก (เก็บสถิติอย่างเดียว)</span>');
   } else {
     st.textContent = 'รอฟอร์ม'; st.style.color = 'var(--dim)';
     el('aiosub2').textContent = 'ราคา' + (pos === 'above' ? 'เหนือแถบ' : 'ใต้แถบ') + ' แต่ยังไม่ครบ 5 แท่งสะอาด';
@@ -972,7 +974,7 @@ function renderSessions(d, dg){
   }
   hint.style.display = 'none'; svg.style.display = 'block';
   var hourFmt = S._hf || (S._hf = new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'numeric',hour12:false}));
-  var bars = d.bars.map(function(b){ return b.length >= 5 ? [b[0], b[2], b[3], b[4]] : b; });
+  var bars = d.bars.slice(-96).map(function(b){ return b.length >= 5 ? [b[0], b[2], b[3], b[4]] : b; });
   function sessOf(ts){
     var h = parseInt(hourFmt.format(new Date(ts*1000)),10) % 24;
     if (h >= 19 || h < 3) return 'ASIA';
