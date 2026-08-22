@@ -5,7 +5,7 @@
 //| Attach to an M15 chart of each symbol you want on the dashboard. |
 //+------------------------------------------------------------------+
 #property copyright "Maxx"
-#property version   "0.70"
+#property version   "0.71"
 #property strict
 
 input string InpURL         = "https://your-app.up.railway.app/api/snapshot"; // Server URL (/api/snapshot)
@@ -246,7 +246,7 @@ void BuildEvents()
 // dashboard session map (~24h of price path).
 string BuildBars()
   {
-   int n = 96;
+   int n = 200;
    MqlRates r[]; ArraySetAsSeries(r, true);
    int got = CopyRates(_Symbol, PERIOD_M15, 0, n, r);
    if(got < 4) return("[]");
@@ -268,7 +268,7 @@ string BuildBars()
 // aligned with BuildBars output, for the dashboard candle chart.
 string BuildMa()
   {
-   int n = 96;
+   int n = 200;
    double a50[], a100[];
    ArraySetAsSeries(a50, true); ArraySetAsSeries(a100, true);
    if(CopyBuffer(hW50, 0, 0, n, a50) < n)   return("null");
@@ -533,10 +533,34 @@ void OnTimer()
    json += ",\"deals\":" + BuildDeals();
    json += ",\"pos\":" + BuildPos();
    json += ",\"m5\":" + BuildM5();
+   json += ",\"aioD1\":" + BuildAioD1();
    json += ",\"events\":" + g_events;
    json += "}";
 
    SendJson(json);
+  }
+
+//+------------------------------------------------------------------+
+// Technique #2 D1 band bias (closed daily bars, no repaint):
+// band = WMA87/WMA100 of D1 closes; slope = WMA100 now vs 20 D1 bars back.
+// bias: +1 close above band & slope up / -1 below & slope down / 0 unclear.
+string BuildAioD1()
+  {
+   double c[]; ArraySetAsSeries(c, true);
+   int need = 130;
+   int got = CopyClose(_Symbol, PERIOD_D1, 1, need, c);
+   if(got < 121) return("null");
+   double w87 = 0, w100 = 0, w100b = 0, den87 = 87.0*88.0/2.0, den100 = 100.0*101.0/2.0;
+   for(int k = 0; k < 87; k++)  w87   += c[k] * (87 - k);
+   for(int k = 0; k < 100; k++) w100  += c[k] * (100 - k);
+   for(int k = 0; k < 100; k++) w100b += c[k + 20] * (100 - k);
+   w87 /= den87; w100 /= den100; w100b /= den100;
+   double up = MathMax(w87, w100), lo = MathMin(w87, w100);
+   double slope = w100 - w100b;
+   int bias = (c[0] > up && slope > 0) ? 1 : (c[0] < lo && slope < 0) ? -1 : 0;
+   string s = "{\"bias\":" + IntegerToString(bias);
+   s += ",\"upper\":" + Jd(up) + ",\"lower\":" + Jd(lo) + "}";
+   return(s);
   }
 
 //+------------------------------------------------------------------+
