@@ -412,6 +412,7 @@ function snapshotContext(sym) {
         (r.ctx && r.ctx.session ? ' ' + r.ctx.session : '') +
         (tradeNotes[r.pos] ? ' | his note' + (tradeNotes[r.pos].setup ? ' (' + tradeNotes[r.pos].setup + ')' : '') + ': "' + String(tradeNotes[r.pos].text || '').slice(0, 150) + '"' : '');
     }).join('\n') || 'none recorded yet'),
+    'AIO BAND TECHNIQUE #2 (parallel test system from his own backtest: WMA87-100 band touch after >=5 bars clean outside, SL opposite band edge +-0.25 ATR, TP 2R, 40-bar horizon, H4-bias filter; both passed and blocked signals are forward-logged): last 30d ' + (function(){ const s = aioStats(sym, 30); if (!s.all.n) return 'no results yet - collecting'; return s.all.n + ' signals, win ' + s.all.winRate + '%, avgR ' + s.all.avgR + (s.all.pf ? ', PF ' + s.all.pf : '') + ' | passed-filter: ' + (s.passed.n ? s.passed.n + ' avgR ' + s.passed.avgR : 'none') + ' | blocked: ' + (s.blocked.n ? s.blocked.n + ' avgR ' + s.blocked.avgR : 'none'); })(),
     'GRADE RUBRIC (how this cockpit grades each trade at the moment of entry): confluence 0-100 = stack aligned +25, right side of EMA200 +10, SAR right side +15, in WMA100 zone +20 (near zone +10/+5), WMA100 bounce history today up to +15, PDH/PDL confluence +10, NEWS LOCK -25; grade A>=80 B>=65 C>=50 else D. IMPORTANT: grade measures alignment with the WMA+SAR system ONLY, not trade quality - his personal PA setups (PA+Market Structure, PA+Momentum) will normally read C/D and that is expected; never scold an off-system trade for being off-system, judge it by the setup named in his journal instead.',
     'TRADER JOURNAL (the trader\'s own notes; his personal setups like PA+Market Structure or PA+Momentum are separate techniques from this cockpit\'s WMA+SAR system - judge each entry against the setup it names, not against the system checklist):\n' + (readTail('journal.jsonl', 80).filter(e => !e.sym || e.sym === sym).slice(-10).map(e =>
       etDayKey(e.at) + ' ' + timeFmtET.format(new Date(e.at)) + ' ET [' + e.tag + (e.setup ? '/' + e.setup : '') + '] ' + String(e.text || '').slice(0, 200) +
@@ -475,6 +476,161 @@ async function askKimi(messages, maxTokens) {
   return text;
 }
 
+// ---------- AIO band engine (technique #2: WMA87-100 band touch, from his Pine backtest) ----------
+// Stateless replay over the M15 bar window each new bar; dedupe by key so restarts are safe.
+// Filter = H4 bias from EA (D1 band bias needs an EA field - not computable from 75h of M15).
+// Both passed AND blocked signals are logged with outcomes, so the filter itself gets forward-tested.
+const AIO_CFG = { fast: 87, slow: 100, minAway: 5, atrLen: 14, bufK: 0.25, tpR: 2.0, horizon: 40 };
+const AIO = { lastBar: {}, logged: null };
+function aioSeed() {
+  AIO.logged = new Set();
+  for (const e of readTail('aio.jsonl', 6000)) if (e.key) AIO.logged.add(e.key);
+}
+function wmaArr(vals, len) {
+  const out = new Array(vals.length).fill(null);
+  const den = len * (len + 1) / 2;
+  for (let i = len - 1; i < vals.length; i++) {
+    let s = 0;
+    for (let k = 0; k < len; k++) s += vals[i - k] * (len - k);
+    out[i] = s / den;
+  }
+  return out;
+}
+function atrArr(bars, len) {
+  const out = new Array(bars.length).fill(null);
+  let rma = null;
+  for (let i = 1; i < bars.length; i++) {
+    const tr = Math.max(bars[i][2] - bars[i][3], Math.abs(bars[i][2] - bars[i - 1][4]), Math.abs(bars[i][3] - bars[i - 1][4]));
+    rma = rma === null ? tr : (rma * (len - 1) + tr) / len;
+    out[i] = rma;
+  }
+  return out;
+}
+function aioProcess(sym, d) {
+  try {
+    const bars = d.bars;
+    if (!bars || bars.length < AIO_CFG.slow + AIO_CFG.minAway + 10 || bars[bars.length - 1].length < 5) return;
+    const lastTs = bars[bars.length - 1][0];
+    if (AIO.lastBar[sym] === lastTs) return;
+    AIO.lastBar[sym] = lastTs;
+    if (!AIO.logged) aioSeed();
+    const n = bars.length, closes = bars.map(b => b[4]);
+    const wf = wmaArr(closes, AIO_CFG.fast), ws = wmaArr(closes, AIO_CFG.slow), atr = atrArr(bars, AIO_CFG.atrLen);
+    const H4 = d.h4 ? (d.h4.biasBuy ? 1 : -1) : 0;
+    const setups = [];
+    let lastEvIdx = -Infinity;
+    for (let i = AIO_CFG.slow + AIO_CFG.minAway; i < n; i++) {
+      const up = Math.max(wf[i], ws[i]), lo = Math.min(wf[i], ws[i]);
+      let above = true, below = true;
+      for (let k = i - AIO_CFG.minAway; k < i; k++) {
+        const u = Math.max(wf[k], ws[k]), l = Math.min(wf[k], ws[k]);
+        if (closes[k] - u <= 0) above = false;
+        if (closes[k] - l >= 0) below = false;
+      }
+      const touch = bars[i][3] <= up && bars[i][2] >= lo;
+      if (!(touch && (above || below))) continue;
+      if (i - lastEvIdx < AIO_CFG.minAway) continue;
+      lastEvIdx = i;
+      const dir = above ? 1 : -1;
+      let eP = dir === 1 ? up : lo;
+      if (dir === 1 && bars[i][1] < eP) eP = bars[i][1];
+      if (dir === -1 && bars[i][1] > eP) eP = bars[i][1];
+      const slP = dir === 1 ? lo - AIO_CFG.bufK * atr[i] : up + AIO_CFG.bufK * atr[i];
+      const risk = Math.abs(eP - slP);
+      if (!risk) continue;
+      const tpP = eP + dir * AIO_CFG.tpR * risk;
+      const rng = Math.max(bars[i][2] - bars[i][3], 1e-9), width = Math.max(up - lo, 1e-9);
+      const pen = dir === 1 ? (up - bars[i][3]) / width : (bars[i][2] - lo) / width;
+      const cloc = dir === 1 ? (closes[i] - bars[i][3]) / rng : (bars[i][2] - closes[i]) / rng;
+      const pat = (pen < 0.5 && cloc >= 0.6) ? 'strong' : (pen > 1.0 && cloc < 0.3) ? 'risk' : 'plain';
+      const pass = H4 !== 0 && H4 === dir;
+      setups.push({ i, ts: bars[i][0], dir, eP, slP, tpP, risk, pat, pass });
+    }
+    for (const s of setups) {
+      let outcome = null, exitReason = null, endIdx = null;
+      for (let j = s.i + 1; j < n && j <= s.i + AIO_CFG.horizon; j++) {
+        if (s.dir === 1 && bars[j][3] <= s.slP) { outcome = -1; exitReason = 'sl'; endIdx = j; break; }
+        if (s.dir === -1 && bars[j][2] >= s.slP) { outcome = -1; exitReason = 'sl'; endIdx = j; break; }
+        if (s.dir === 1 && bars[j][2] >= s.tpP) { outcome = AIO_CFG.tpR; exitReason = 'tp'; endIdx = j; break; }
+        if (s.dir === -1 && bars[j][3] <= s.tpP) { outcome = AIO_CFG.tpR; exitReason = 'tp'; endIdx = j; break; }
+      }
+      if (outcome === null && n - 1 >= s.i + AIO_CFG.horizon) {
+        const j = s.i + AIO_CFG.horizon;
+        outcome = s.dir * (closes[j] - s.eP) / s.risk; exitReason = 'expire'; endIdx = j;
+      }
+      const kSet = sym + '|set|' + s.ts;
+      if (!AIO.logged.has(kSet)) {
+        AIO.logged.add(kSet);
+        logAppend('aio.jsonl', { at: Date.now(), key: kSet, kind: 'setup', sym, ts: s.ts, dir: s.dir,
+          entry: +s.eP.toFixed(2), sl: +s.slP.toFixed(2), tp: +s.tpP.toFixed(2), risk: +s.risk.toFixed(2),
+          pat: s.pat, pass: s.pass, h4: H4, session: sessOf(s.ts) });
+        if (s.ts === lastTs) {
+          broadcast({ type: 'aio', sym, pass: s.pass, txt: 'WMA BAND #2: แตะแถบ ' + (s.dir === 1 ? 'จากบน (BUY)' : 'จากล่าง (SELL)')
+            + ' @' + s.eP.toFixed(2) + ' SL ' + s.slP.toFixed(2) + ' TP ' + s.tpP.toFixed(2)
+            + (s.pass ? ' · ผ่านฟิลเตอร์ H4' : ' · โดนฟิลเตอร์ H4 บล็อก (เก็บสถิติอย่างเดียว)')
+            + (s.pat === 'risk' ? ' · แท่งปิดแย่ ระวัง' : s.pat === 'strong' ? ' · แท่งปิดสวย' : '') });
+        }
+      }
+      if (outcome !== null) {
+        const kRes = sym + '|res|' + s.ts;
+        if (!AIO.logged.has(kRes)) {
+          AIO.logged.add(kRes);
+          logAppend('aio.jsonl', { at: Date.now(), key: kRes, kind: 'result', sym, ts: s.ts, endTs: bars[endIdx][0],
+            dir: s.dir, r: +outcome.toFixed(3), exit: exitReason, pat: s.pat, pass: s.pass, h4: H4,
+            session: sessOf(s.ts), bars: endIdx - s.i });
+          if (bars[endIdx][0] === lastTs) {
+            broadcast({ type: 'aio', sym, pass: s.pass, txt: 'WMA BAND #2: จบไม้ ' + (s.dir === 1 ? 'BUY' : 'SELL')
+              + ' ' + (outcome > 0 ? '+' : '') + outcome.toFixed(2) + 'R (' + exitReason + ')'
+              + (s.pass ? '' : ' [ไม้ที่ถูกบล็อก - นับสถิติเทียบ]') });
+          }
+        }
+      }
+    }
+  } catch (e) {}
+}
+function aioStats(sym, days) {
+  const cutoff = Date.now() - days * 86400000;
+  const res = readTail('aio.jsonl', 8000).filter(e => e.sym === sym && e.kind === 'result' && e.at >= cutoff);
+  function agg(rows) {
+    const n = rows.length;
+    if (!n) return { n: 0 };
+    const sum = rows.reduce((a, e) => a + e.r, 0);
+    const wins = rows.filter(e => e.r > 0);
+    const loss = rows.filter(e => e.r < 0).reduce((a, e) => a + e.r, 0);
+    return { n, winRate: Math.round(wins.length / n * 100), avgR: +(sum / n).toFixed(3), sumR: +sum.toFixed(1),
+      pf: loss < 0 ? +(wins.reduce((a, e) => a + e.r, 0) / Math.abs(loss)).toFixed(2) : null };
+  }
+  const bySess = {};
+  for (const e of res) { (bySess[e.session] = bySess[e.session] || []).push(e); }
+  const sessOut = {};
+  for (const k of Object.keys(bySess)) sessOut[k] = agg(bySess[k]);
+  return { all: agg(res), passed: agg(res.filter(e => e.pass)), blocked: agg(res.filter(e => !e.pass)),
+    byPat: { strong: agg(res.filter(e => e.pat === 'strong')), plain: agg(res.filter(e => e.pat === 'plain')), risk: agg(res.filter(e => e.pat === 'risk')) },
+    bySession: sessOut };
+}
+app.get('/api/aio', (req, res) => {
+  const sym = req.query.sym || 'XAUUSD';
+  const days = Math.min(90, Math.max(1, parseInt(req.query.days || '30', 10)));
+  const out = aioStats(sym, days);
+  const snap = snapshots[sym] && snapshots[sym].data;
+  if (snap && snap.bars && snap.bars.length > AIO_CFG.slow + AIO_CFG.minAway && snap.bars[snap.bars.length - 1].length >= 5) {
+    const bars = snap.bars, n = bars.length, closes = bars.map(b => b[4]);
+    const wf = wmaArr(closes, AIO_CFG.fast), ws = wmaArr(closes, AIO_CFG.slow);
+    const up = Math.max(wf[n - 1], ws[n - 1]), lo = Math.min(wf[n - 1], ws[n - 1]);
+    let above = true, below = true;
+    for (let k = n - AIO_CFG.minAway; k < n; k++) {
+      const u = Math.max(wf[k], ws[k]), l = Math.min(wf[k], ws[k]);
+      if (closes[k] - u <= 0) above = false;
+      if (closes[k] - l >= 0) below = false;
+    }
+    out.now = { upper: +up.toFixed(2), lower: +lo.toFixed(2),
+      pos: snap.bid > up ? 'above' : snap.bid < lo ? 'below' : 'inside',
+      armed: above ? 'buy' : below ? 'sell' : null,
+      h4: snap.h4 ? (snap.h4.biasBuy ? 1 : -1) : 0 };
+  }
+  res.json({ ok: true, days, stats: out });
+});
+
 // ---------- MT5 snapshot in ----------
 app.post('/api/snapshot', (req, res) => {
   if (!authOk(req)) return res.status(401).json({ ok: false, error: 'bad key' });
@@ -486,6 +642,7 @@ app.post('/api/snapshot', (req, res) => {
   broadcast({ sym: d.sym, at: rec.at, data: d });
   res.json({ ok: true });
   record(d.sym, prev, d);
+  aioProcess(d.sym, d);
   maybeAutoComment(d.sym, prev, d); // fire and forget
 });
 
@@ -918,7 +1075,7 @@ app.get('/api/system', (req, res) => {
   for (const sym of Object.keys(snapshots))
     feeds[sym] = { ageSec: Math.round((Date.now() - snapshots[sym].at) / 1000) };
   const files = {};
-  for (const f of ['events.jsonl', 'sar.jsonl', 'bias.jsonl', 'structure.jsonl', 'trades.jsonl', 'health.jsonl']) {
+  for (const f of ['events.jsonl', 'sar.jsonl', 'bias.jsonl', 'structure.jsonl', 'trades.jsonl', 'health.jsonl', 'journal.jsonl', 'aio.jsonl']) {
     try { files[f] = +(fs.statSync(path.join(DATA_DIR, f)).size / 1024).toFixed(1); }
     catch (e) { files[f] = 0; }
   }
