@@ -574,8 +574,11 @@ function aioProcess(sym, d) {
         if (s.ts === lastTs) {
           broadcast({ type: 'aio', sym, pass: s.pass, txt: 'WMA BAND #2: แตะแถบ ' + (s.dir === 1 ? 'จากบน (BUY)' : 'จากล่าง (SELL)')
             + ' @' + s.eP.toFixed(2) + ' SL ' + s.slP.toFixed(2) + ' TP ' + s.tpP.toFixed(2)
-            + (s.pass ? ' · ผ่านฟิลเตอร์ H4' : ' · โดนฟิลเตอร์ H4 บล็อก (เก็บสถิติอย่างเดียว)')
+            + (s.pass ? ' · ผ่านฟิลเตอร์' : ' · โดนฟิลเตอร์บล็อก (เก็บสถิติอย่างเดียว)')
             + (s.pat === 'risk' ? ' · แท่งปิดแย่ ระวัง' : s.pat === 'strong' ? ' · แท่งปิดสวย' : '') });
+          if (s.pass) autoCommentEvent(sym, 'Technique #2 (WMA Band) fired a ' + (s.dir === 1 ? 'BUY' : 'SELL')
+            + ' touch signal at ' + s.eP.toFixed(2) + ' (SL ' + s.slP.toFixed(2) + ', TP ' + s.tpP.toFixed(2)
+            + ', candle pattern: ' + s.pat + ') that PASSED the trend filter - a simulated forward-test trade is now being tracked. This is the parallel test system, separate from the main WMA100+SAR checklist.');
         }
       }
       if (outcome !== null) {
@@ -665,6 +668,8 @@ function transition(prev, d) {
     return 'H4 candle closed and daily bias flipped to ' + (d.h4.biasBuy ? 'BUY only' : 'SELL only');
   if (prev.sar && d.sar && prev.sar.up !== d.sar.up)
     return 'Parabolic SAR flipped to ' + (d.sar.up ? 'below price (uptrend)' : 'above price (downtrend)');
+  if (prev.aioD1 && d.aioD1 && typeof prev.aioD1.bias === 'number' && typeof d.aioD1.bias === 'number' && prev.aioD1.bias !== d.aioD1.bias)
+    return 'Technique #2 (WMA Band) daily D1 bias changed to ' + (d.aioD1.bias === 1 ? 'BUY - band system looks for buys only today' : d.aioD1.bias === -1 ? 'SELL - band system looks for sells only today' : 'NEUTRAL - band system filter blocks all its signals today');
   if (!p.inZone100 && c.inZone100)
     return 'Price entered the WMA100 zone';
   if (!p.bounceConfirm && c.bounceConfirm && c.inZone100)
@@ -672,6 +677,21 @@ function transition(prev, d) {
   return null;
 }
 
+async function autoCommentEvent(sym, ev) {
+  if (!KIMI_KEY || !ev) return;
+  const st = aiState[sym] || (aiState[sym] = { lastAutoAt: 0 });
+  if (Date.now() - st.lastAutoAt < 90000) return;
+  if (!aiRateOk()) return;
+  st.lastAutoAt = Date.now();
+  try {
+    const text = await askKimi([
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: 'เหตุการณ์ที่เพิ่งเกิด: ' + ev + '\n\nข้อมูลปัจจุบัน:\n' + snapshotContext(sym)
+        + '\n\nเขียนคำบรรยายเหตุการณ์นี้สำหรับ feed ยาว 1-2 ประโยคเท่านั้น' }
+    ], 800);
+    broadcast({ type: 'ai', sym, text });
+  } catch (e) { noteAiError(e.message); }
+}
 async function maybeAutoComment(sym, prev, d) {
   if (!KIMI_KEY) return;
   const ev = transition(prev, d);
@@ -720,6 +740,10 @@ app.post('/api/ai/devil', async (req, res) => {
     if (!snap.pos) return res.status(400).json({ ok: false, error: 'ต้องอัพ EA v0.61 เพื่อส่งรายละเอียดไม้ที่เปิดอยู่' });
     if (!snap.pos.length) return res.status(400).json({ ok: false, error: 'ไม่มีไม้เปิดค้างอยู่ตอนนี้' });
     desc = 'ไม้ที่เปิดค้างอยู่จริงตอนนี้ (ดูบรรทัด OPEN POSITIONS ในข้อมูล) — โจมตีความเสี่ยงของการถือต่อ';
+  } else if (target === 'band') {
+    const nw = aioNow(sym);
+    if (!nw) return res.status(400).json({ ok: false, error: 'ยังไม่มีข้อมูลแถบเทคนิค #2 (ต้อง EA v0.71)' });
+    desc = 'ไม้เทคนิค #2 (WMA Band): ' + (nw.armed ? (nw.armed === 'buy' ? 'BUY' : 'SELL') + ' เมื่อราคาแตะแถบ ' + nw.lower + '-' + nw.upper : 'ยังไม่ armed - โจมตีสภาพแถบตอนนี้ว่าทำไมสัญญาณถัดไปอาจเป็นกับดัก') + ' (ดูบรรทัด AIO BAND ในข้อมูล - ตัดสินตามกติกาเทคนิค #2 ไม่ใช่ checklist WMA100+SAR)';
   } else desc = 'ไม้มาตรฐานตามระบบ: ' + ((snap.h4 && snap.h4.biasBuy) ? 'BUY' : 'SELL') + ' ที่โซน WMA100 ตามเทคนิค';
   try {
     const text = await askKimi([
