@@ -113,6 +113,14 @@
 
 <div class="grid" style="margin-top:14px">
   <div class="panel" style="grid-column:1/-1">
+    <div class="ptitle">RESEARCH DESK — Kimi เสนอ · ระบบทดสอบ · forward ตัดสิน</div>
+    <button id="hypobtn" class="qbtn" onclick="proposeHypo()" style="margin-bottom:10px">ให้ Kimi เสนอสมมติฐานใหม่ (ใช้ 1 AI call)</button>
+    <div id="hypobox" style="font-size:12px;color:var(--dim)">กำลังโหลด…</div>
+  </div>
+</div>
+
+<div class="grid" style="margin-top:14px">
+  <div class="panel" style="grid-column:1/-1">
     <div class="ptitle">เทคนิค #2 — WMA BAND 87-100 (forward test จากสัญญาณจำลอง)</div>
     <div id="aiobox"></div>
   </div>
@@ -131,6 +139,7 @@
 'use strict';
 var Q = { sym: null, days: 30, syms: [] };
 function el(id){ return document.getElementById(id); }
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
 function f2(v){ return Number(v || 0).toFixed(2); }
 function holdCls(h){ return h >= 65 ? 'pos' : h >= 45 ? 'mid' : 'neg'; }
 
@@ -189,7 +198,57 @@ async function loadAio(){
     box.innerHTML = h;
   } catch(e){ box.innerHTML = '<div style="color:var(--dim);font-size:12px">โหลดข้อมูลเทคนิค #2 ไม่ได้</div>'; }
 }
+function hypoMetric(base, a){
+  if (!a || !a.n) return '<span style="color:var(--dim)">n=0</span>';
+  if (base === 'aio') return 'avgR <b>' + a.avgR + '</b> · ชนะ ' + a.winRate + '% (n=' + a.n + ')';
+  return 'hold <b>' + a.holdRate + '%</b> · exp ' + a.expectancy + ' (n=' + a.n + ')';
+}
+function renderHypos(list){
+  var box = el('hypobox');
+  if (!list.length){ box.innerHTML = 'ยังไม่มีสมมติฐาน — กดปุ่มให้ Kimi ขุดจากข้อมูลจริงได้เลย (เสนอทีละ 1 ข้อ ตั้งใจให้ช้า กัน data mining)'; return; }
+  box.innerHTML = list.map(function(h){
+    var age = Math.max(0, (Date.now() - h.at) / 86400000).toFixed(1);
+    var f = h.forward || {}, im = h.insample || {};
+    var fN = f.match ? f.match.n : 0;
+    var verdict;
+    if (fN < 15) verdict = '<span style="color:var(--wait)">รอ forward (n=' + fN + '/15)</span>';
+    else {
+      var better = h.base === 'aio'
+        ? (f.match.avgR > (f.rest && f.rest.n ? f.rest.avgR : 0))
+        : (f.match.expectancy > (f.rest && f.rest.n ? f.rest.expectancy : 0));
+      verdict = better ? '<span style="color:var(--buy)">ยืนได้บน forward</span>' : '<span style="color:var(--sell)">ไม่ยืนบน forward</span>';
+    }
+    return '<div style="border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-bottom:8px">'
+      + '<div style="color:var(--text);font-weight:600">' + esc(h.title) + ' <span style="font-family:var(--mono);font-size:10px;color:var(--dim)">[' + h.base + '] ' + esc(JSON.stringify(h.cond)) + ' · เสนอเมื่อ ' + age + ' วันก่อน</span></div>'
+      + (h.rationale ? '<div style="font-size:11.5px;color:var(--dim);margin-top:3px">' + esc(h.rationale) + '</div>' : '')
+      + '<div style="font-family:var(--mono);font-size:11px;margin-top:5px">in-sample: ' + hypoMetric(h.base, im.match) + ' <span style="color:var(--dim)">(เทียบนอกเงื่อนไข ' + hypoMetric(h.base, im.rest) + ')</span></div>'
+      + '<div style="font-family:var(--mono);font-size:11px;margin-top:2px">forward: ' + hypoMetric(h.base, f.match) + ' <span style="color:var(--dim)">(เทียบ ' + hypoMetric(h.base, f.rest) + ')</span> · ' + verdict + '</div>'
+      + '</div>';
+  }).join('');
+}
+async function loadHypos(){
+  try {
+    var h = {'Content-Type': 'application/json'};
+    try { var pn = localStorage.getItem('dashpin'); if (pn) h['X-DASH-PIN'] = pn; } catch(e){}
+    var j = await (await fetch('/api/research?sym=' + encodeURIComponent(Q.sym), { headers: h })).json();
+    if (j.ok) renderHypos(j.hypos || []);
+  } catch(e){ el('hypobox').textContent = 'โหลดไม่ได้: ' + e.message; }
+}
+async function proposeHypo(){
+  var btn = el('hypobtn');
+  btn.disabled = true; btn.textContent = 'Kimi กำลังขุดข้อมูล…';
+  try {
+    var h = {'Content-Type': 'application/json'};
+    try { var pn = localStorage.getItem('dashpin'); if (pn) h['X-DASH-PIN'] = pn; } catch(e){}
+    var r = await fetch('/api/research/propose', { method: 'POST', headers: h, body: JSON.stringify({ sym: Q.sym }) });
+    var j = await r.json();
+    if (!j.ok) alert('เสนอไม่สำเร็จ: ' + (j.error || r.status));
+    loadHypos();
+  } catch(e){ alert('เสนอไม่สำเร็จ: ' + e.message); }
+  btn.disabled = false; btn.textContent = 'ให้ Kimi เสนอสมมติฐานใหม่ (ใช้ 1 AI call)';
+}
 async function load(){
+  loadHypos();
   loadAio();
   var q;
   try { q = await (await fetch('/api/quant?sym=' + encodeURIComponent(Q.sym) + '&days=' + Q.days)).json(); }
