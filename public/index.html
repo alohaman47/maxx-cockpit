@@ -95,6 +95,15 @@
   .aionow{font-family:var(--mono);font-size:11.5px;color:var(--text);margin-bottom:8px;line-height:1.7}
   .aiostat{font-family:var(--mono);font-size:10.5px;color:var(--dim);line-height:1.8;border-top:1px solid rgba(36,41,56,.6);padding-top:8px}
   .aiostat b{color:var(--gold2)}
+  .sigsplit{display:grid;grid-template-columns:1.3fr 1fr}
+  .sighalf{min-width:0}
+  .aiohalf{border-left:1px solid rgba(36,41,56,.75);padding-left:18px;margin-left:18px;display:flex;flex-direction:column;justify-content:center;gap:9px;text-align:center}
+  .aiohead{font-family:var(--mono);font-size:10px;letter-spacing:.18em;color:var(--dim)}
+  .aiostate2{font-family:var(--serif);font-weight:700;font-size:24px;letter-spacing:.05em}
+  .aiosub2{font-size:11.5px;color:var(--dim)}
+  .aioband2{font-family:var(--mono);font-size:11.5px;color:var(--text);line-height:1.7}
+  .aioplan2{font-family:var(--mono);font-size:10.5px;color:var(--gold2);line-height:1.7}
+  @media(max-width:1100px){.sigsplit{grid-template-columns:1fr}.aiohalf{border-left:none;margin-left:0;padding-left:0;border-top:1px solid rgba(36,41,56,.75);padding-top:12px;margin-top:12px}}
   .tlsum{font-family:var(--mono);font-size:11px;color:var(--gold2);margin-bottom:8px}
   .tlrow{display:flex;align-items:center;gap:10px;padding:7px 9px;background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-bottom:6px;font-size:12px;flex-wrap:wrap}
   .tldir{font-family:var(--mono);font-weight:800;font-size:11px;padding:2px 7px;border-radius:6px}
@@ -306,6 +315,8 @@
 
   <div class="sigwrap">
     <div class="sigcard" id="sigcard">
+      <div class="sigsplit">
+      <div class="sighalf">
       <div class="sigstate" id="sigstate"></div>
       <div class="sigsub" id="sigsub"></div>
       <div class="pipeline" id="pipeline"></div>
@@ -317,6 +328,15 @@
       </div>
       <div class="nextstep" id="nextstep"></div>
       <div class="ctxstat" id="ctxstat" style="display:none"></div>
+      </div>
+      <div class="sighalf aiohalf">
+        <div class="aiohead">WMA BAND 87-100 — เทคนิค #2</div>
+        <div class="aiostate2" id="aiostate2">—</div>
+        <div class="aiosub2" id="aiosub2"></div>
+        <div class="aioband2" id="aioband2"></div>
+        <div class="aioplan2" id="aioplan2"></div>
+      </div>
+      </div>
     </div>
     <div class="panel">
       <div class="ptitle">Checklist ก่อนกด — ตามเทคนิค</div>
@@ -431,6 +451,58 @@ function el(id){ return document.getElementById(id); }
 // ---- Eastern Time helpers ----
 function etTime(dateObj){
   return dateObj.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'America/New_York'});
+}
+// AIO band live state (client-side, cached per closed bar) for the split signal card
+function aioBandCalc(d){
+  var bars = d.bars;
+  if (!bars || bars.length < 120 || bars[bars.length-1].length < 5) return null;
+  var n = bars.length, lastTs = bars[n-1][0], key = S.active + '|' + lastTs;
+  if (S._aioC && S._aioC.key === key) return S._aioC;
+  var closes = bars.map(function(b){ return b[4]; });
+  function wmaAt(idx, len){ var s = 0, den = len*(len+1)/2; for (var k=0;k<len;k++) s += closes[idx-k]*(len-k); return s/den; }
+  var U = {}, L = {};
+  for (var i = n-6; i < n; i++){ var a = wmaAt(i,87), b = wmaAt(i,100); U[i] = Math.max(a,b); L[i] = Math.min(a,b); }
+  var above = true, below = true;
+  for (var j = n-5; j < n; j++){ if (closes[j] - U[j] <= 0) above = false; if (closes[j] - L[j] >= 0) below = false; }
+  var rma = null;
+  for (var t = 1; t < n; t++){
+    var tr = Math.max(bars[t][2]-bars[t][3], Math.abs(bars[t][2]-bars[t-1][4]), Math.abs(bars[t][3]-bars[t-1][4]));
+    rma = rma === null ? tr : (rma*13 + tr)/14;
+  }
+  S._aioC = { key: key, upper: U[n-1], lower: L[n-1], atr: rma, armed: above ? 'buy' : below ? 'sell' : null };
+  return S._aioC;
+}
+function renderAioHalf(d, dg){
+  var a = aioBandCalc(d), st = el('aiostate2');
+  if (!st) return;
+  if (!a){ st.textContent = '—'; el('aiosub2').textContent = 'รอข้อมูล bars จาก EA'; el('aioband2').textContent = ''; el('aioplan2').textContent = ''; return; }
+  var pos = d.bid > a.upper ? 'above' : d.bid < a.lower ? 'below' : 'inside';
+  var h4 = d.h4 ? (d.h4.biasBuy ? 1 : -1) : 0;
+  var buf = 0.25 * a.atr;
+  var distEdge = pos === 'above' ? d.bid - a.upper : pos === 'below' ? a.lower - d.bid : 0;
+  if (pos === 'inside'){
+    st.textContent = 'ในแถบ'; st.style.color = 'var(--wait)';
+    el('aiosub2').textContent = 'ราคาอยู่ในแถบ — ถ้าเพิ่งแตะจากนอกแถบ สัญญาณขึ้น feed แล้ว';
+    el('aioband2').innerHTML = 'แถบ ' + fmt(a.lower, dg) + ' – ' + fmt(a.upper, dg);
+    el('aioplan2').textContent = '';
+  } else if (a.armed){
+    var dir = a.armed === 'buy' ? 1 : -1;
+    var entry = dir === 1 ? a.upper : a.lower;
+    var sl = dir === 1 ? a.lower - buf : a.upper + buf;
+    var risk = Math.abs(entry - sl), tp = entry + dir * 2 * risk;
+    var passH4 = h4 !== 0 && h4 === dir;
+    st.textContent = dir === 1 ? 'ARMED — รอแตะ BUY' : 'ARMED — รอแตะ SELL';
+    st.style.color = dir === 1 ? 'var(--buy)' : 'var(--sell)';
+    el('aiosub2').textContent = 'นอกแถบสะอาดครบ ' + 5 + ' แท่ง — แตะแถบเมื่อไหร่ = สัญญาณ';
+    el('aioband2').innerHTML = 'แถบ ' + fmt(a.lower, dg) + ' – ' + fmt(a.upper, dg) + ' · ราคาห่างขอบ ' + fmt(distEdge, dg) + ' pts';
+    el('aioplan2').innerHTML = 'entry ' + fmt(entry, dg) + ' · SL ' + fmt(sl, dg) + ' · TP(2R) ' + fmt(tp, dg)
+      + '<br>ฟิลเตอร์ H4: ' + (passH4 ? '<span style="color:var(--buy)">ผ่าน</span>' : '<span style="color:var(--sell)">ขัด — สัญญาณจะโดนบล็อก (เก็บสถิติอย่างเดียว)</span>');
+  } else {
+    st.textContent = 'รอฟอร์ม'; st.style.color = 'var(--dim)';
+    el('aiosub2').textContent = 'ราคา' + (pos === 'above' ? 'เหนือแถบ' : 'ใต้แถบ') + ' แต่ยังไม่ครบ 5 แท่งสะอาด';
+    el('aioband2').innerHTML = 'แถบ ' + fmt(a.lower, dg) + ' – ' + fmt(a.upper, dg) + ' · ราคาห่างขอบ ' + fmt(distEdge, dg) + ' pts';
+    el('aioplan2').textContent = '';
+  }
 }
 // MARKET HEAT: direction+strength from M15 bars — vol ratio (2h vs 24h) + Kaufman-style efficiency ratio
 function marketHeat(d){
@@ -660,6 +732,7 @@ function render(){
   }
   el('px').innerHTML = fmt(d.bid, dg) + '<small>' + chgHtml + 'bid · '+etTime(new Date(rec.at))+' ET</small>';
   renderHeat(d, dg);
+  renderAioHalf(d, dg);
 
   // bias strip
   var up = d.bid > d.h4.wma50;
