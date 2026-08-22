@@ -100,6 +100,7 @@
   .aiohalf{border-left:1px solid rgba(36,41,56,.75);padding-left:18px;margin-left:18px;display:flex;flex-direction:column;justify-content:center;gap:9px;text-align:center}
   .aiohead{font-family:var(--mono);font-size:10px;letter-spacing:.18em;color:var(--dim)}
   .aiostate2{font-family:var(--serif);font-weight:700;font-size:24px;letter-spacing:.05em}
+  .aioday{font-family:var(--mono);font-size:13px;font-weight:700;letter-spacing:.06em}
   .aiosub2{font-size:11.5px;color:var(--dim)}
   .aioband2{font-family:var(--mono);font-size:11.5px;color:var(--text);line-height:1.7}
   .aioplan2{font-family:var(--mono);font-size:10.5px;color:var(--gold2);line-height:1.7}
@@ -331,6 +332,7 @@
       </div>
       <div class="sighalf aiohalf">
         <div class="aiohead">WMA BAND 87-100 — เทคนิค #2</div>
+        <div class="aioday" id="aioday"></div>
         <div class="aiostate2" id="aiostate2">—</div>
         <div class="aiosub2" id="aiosub2"></div>
         <div class="aioband2" id="aioband2"></div>
@@ -405,7 +407,7 @@
       <button class="jsave" onclick="jSave()">จดบันทึก</button>
       <div class="jnav"><button onclick="jDay(-1)">◀</button><span id="jday"></span><button onclick="jDay(1)">▶</button></div>
       <div class="jlist" id="jlist"></div>
-      <div class="footer">MAXX COCKPIT v2.4 · live · กดออเดอร์จริงใน MT5</div>
+      <div class="footer">MAXX COCKPIT v2.4.1 · live · กดออเดอร์จริงใน MT5</div>
     </div>
   </div>
 </div>
@@ -477,6 +479,14 @@ function aioBandCalc(d){
 function renderAioHalf(d, dg){
   var a = aioBandCalc(d), st = el('aiostate2');
   if (!st) return;
+  var dayEl = el('aioday');
+  if (dayEl){
+    var db = (d.aioD1 && typeof d.aioD1.bias === 'number') ? d.aioD1.bias : null;
+    if (db === null){ dayEl.textContent = ''; }
+    else if (db === 1){ dayEl.innerHTML = 'วันนี้: <span style="color:var(--buy)">BUY \u25B2</span>'; }
+    else if (db === -1){ dayEl.innerHTML = 'วันนี้: <span style="color:var(--sell)">SELL \u25BC</span>'; }
+    else { dayEl.innerHTML = 'วันนี้: <span style="color:var(--dim)">พัก \u2014</span>'; }
+  }
   if (!a){ st.textContent = '—'; el('aiosub2').textContent = 'รอข้อมูล bars จาก EA'; el('aioband2').textContent = ''; el('aioplan2').textContent = ''; return; }
   var pos = d.bid > a.upper ? 'above' : d.bid < a.lower ? 'below' : 'inside';
   var h4 = d.h4 ? (d.h4.biasBuy ? 1 : -1) : 0;
