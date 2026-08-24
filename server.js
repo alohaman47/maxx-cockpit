@@ -417,7 +417,7 @@ function snapshotContext(sym) {
         (nw.armed ? ', ARMED for ' + nw.armed.toUpperCase() + ' on next touch' : ', not armed (needs 5 clean bars outside)') +
         ', H4 bias ' + (nw.h4 === 1 ? 'BUY' : nw.h4 === -1 ? 'SELL' : '-') +
         ', D1 daily bias ' + (nw.d1 === 1 ? 'BUY' : nw.d1 === -1 ? 'SELL' : nw.d1 === 0 ? 'NEUTRAL (all its signals blocked today)' : 'n/a'); })(),
-    'AIO BAND TECHNIQUE #2 (parallel test system from his own backtest: WMA87-100 band touch after >=5 bars clean outside, SL opposite band edge +-0.25 ATR, TP 2R, 40-bar horizon, H4-bias filter; both passed and blocked signals are forward-logged): last 30d ' + (function(){ const s = aioStats(sym, 30); if (!s.all.n) return 'no results yet - collecting'; return s.all.n + ' signals, win ' + s.all.winRate + '%, avgR ' + s.all.avgR + (s.all.pf ? ', PF ' + s.all.pf : '') + ' | passed-filter: ' + (s.passed.n ? s.passed.n + ' avgR ' + s.passed.avgR : 'none') + ' | blocked: ' + (s.blocked.n ? s.blocked.n + ' avgR ' + s.blocked.avgR : 'none'); })(),
+    'AIO BAND TECHNIQUE #2 v2 (parallel test system, band = WMA87 +/- 0.3 ATR so edges are always 0.6 ATR apart; touch after >=5 bars clean outside, SL opposite band edge +-0.25 ATR, TP 2R, 40-bar horizon, H4-bias filter; both passed and blocked signals are forward-logged): last 30d ' + (function(){ const s = aioStats(sym, 30); if (!s.all.n) return 'no results yet - collecting'; return s.all.n + ' signals, win ' + s.all.winRate + '%, avgR ' + s.all.avgR + (s.all.pf ? ', PF ' + s.all.pf : '') + ' | passed-filter: ' + (s.passed.n ? s.passed.n + ' avgR ' + s.passed.avgR : 'none') + ' | blocked: ' + (s.blocked.n ? s.blocked.n + ' avgR ' + s.blocked.avgR : 'none'); })(),
     'GRADE RUBRIC (how this cockpit grades each trade at the moment of entry): confluence 0-100 = stack aligned +25, right side of EMA200 +10, SAR right side +15, in WMA100 zone +20 (near zone +10/+5), WMA100 bounce history today up to +15, PDH/PDL confluence +10, NEWS LOCK -25; grade A>=80 B>=65 C>=50 else D. IMPORTANT: grade measures alignment with the WMA+SAR system ONLY, not trade quality - his personal PA setups (PA+Market Structure, PA+Momentum) will normally read C/D and that is expected; never scold an off-system trade for being off-system, judge it by the setup named in his journal instead.',
     'TRADER JOURNAL (the trader\'s own notes; his personal setups like PA+Market Structure or PA+Momentum are separate techniques from this cockpit\'s WMA+SAR system - judge each entry against the setup it names, not against the system checklist):\n' + (readTail('journal.jsonl', 80).filter(e => !e.sym || e.sym === sym).slice(-10).map(e =>
       etDayKey(e.at) + ' ' + timeFmtET.format(new Date(e.at)) + ' ET [' + e.tag + (e.setup ? '/' + e.setup : '') + '] ' + String(e.text || '').slice(0, 200) +
@@ -485,7 +485,7 @@ async function askKimi(messages, maxTokens) {
 // Stateless replay over the M15 bar window each new bar; dedupe by key so restarts are safe.
 // Filter = H4 bias from EA (D1 band bias needs an EA field - not computable from 75h of M15).
 // Both passed AND blocked signals are logged with outcomes, so the filter itself gets forward-tested.
-const AIO_CFG = { fast: 87, slow: 100, minAway: 5, atrLen: 14, bufK: 0.25, tpR: 2.0, horizon: 40 };
+const AIO_CFG = { fast: 87, slow: 100, minAway: 5, atrLen: 14, bufK: 0.25, tpR: 2.0, horizon: 40, bandK: 0.3, ver: 'v2' }; // v2 band = WMA87 +/- bandK*ATR (edges always 2*bandK = 0.6 ATR apart); v1 (WMA87-100) rows remain in book untagged
 const AIO = { lastBar: {}, logged: null };
 function aioSeed() {
   AIO.logged = new Set();
@@ -520,19 +520,21 @@ function aioProcess(sym, d) {
     AIO.lastBar[sym] = lastTs;
     if (!AIO.logged) aioSeed();
     const n = bars.length, closes = bars.map(b => b[4]);
-    const wf = wmaArr(closes, AIO_CFG.fast), ws = wmaArr(closes, AIO_CFG.slow), atr = atrArr(bars, AIO_CFG.atrLen);
+    const wf = wmaArr(closes, AIO_CFG.fast), atr = atrArr(bars, AIO_CFG.atrLen);
+    const bandU = i => wf[i] + AIO_CFG.bandK * atr[i], bandL = i => wf[i] - AIO_CFG.bandK * atr[i];
     const H4 = d.h4 ? (d.h4.biasBuy ? 1 : -1) : 0;
     const D1 = (d.aioD1 && typeof d.aioD1.bias === 'number') ? d.aioD1.bias : null;
     const filt = D1 === null ? 'H4' : 'H4+D1';
     const setups = [];
     let lastEvIdx = -Infinity;
     for (let i = AIO_CFG.slow + AIO_CFG.minAway; i < n; i++) {
-      const up = Math.max(wf[i], ws[i]), lo = Math.min(wf[i], ws[i]);
+      if (wf[i] == null || atr[i] == null) continue;
+      const up = bandU(i), lo = bandL(i);
       let above = true, below = true;
       for (let k = i - AIO_CFG.minAway; k < i; k++) {
-        const u = Math.max(wf[k], ws[k]), l = Math.min(wf[k], ws[k]);
-        if (closes[k] - u <= 0) above = false;
-        if (closes[k] - l >= 0) below = false;
+        if (wf[k] == null || atr[k] == null) { above = false; below = false; break; }
+        if (closes[k] - bandU(k) <= 0) above = false;
+        if (closes[k] - bandL(k) >= 0) below = false;
       }
       const touch = bars[i][3] <= up && bars[i][2] >= lo;
       if (!(touch && (above || below))) continue;
@@ -568,7 +570,7 @@ function aioProcess(sym, d) {
       const kSet = sym + '|set|' + s.ts;
       if (!AIO.logged.has(kSet)) {
         AIO.logged.add(kSet);
-        logAppend('aio.jsonl', { at: Date.now(), key: kSet, kind: 'setup', sym, ts: s.ts, dir: s.dir,
+        logAppend('aio.jsonl', { at: Date.now(), key: kSet, kind: 'setup', ver: AIO_CFG.ver, sym, ts: s.ts, dir: s.dir,
           entry: +s.eP.toFixed(2), sl: +s.slP.toFixed(2), tp: +s.tpP.toFixed(2), risk: +s.risk.toFixed(2),
           pat: s.pat, pass: s.pass, h4: H4, d1: D1, filt, session: sessOf(s.ts) });
         if (s.ts === lastTs) {
@@ -585,7 +587,7 @@ function aioProcess(sym, d) {
         const kRes = sym + '|res|' + s.ts;
         if (!AIO.logged.has(kRes)) {
           AIO.logged.add(kRes);
-          logAppend('aio.jsonl', { at: Date.now(), key: kRes, kind: 'result', sym, ts: s.ts, endTs: bars[endIdx][0],
+          logAppend('aio.jsonl', { at: Date.now(), key: kRes, kind: 'result', ver: AIO_CFG.ver, sym, ts: s.ts, endTs: bars[endIdx][0],
             dir: s.dir, r: +outcome.toFixed(3), exit: exitReason, pat: s.pat, pass: s.pass, h4: H4, d1: D1, filt,
             session: sessOf(s.ts), bars: endIdx - s.i });
           if (bars[endIdx][0] === lastTs) {
@@ -600,7 +602,7 @@ function aioProcess(sym, d) {
 }
 function aioStats(sym, days) {
   const cutoff = Date.now() - days * 86400000;
-  const res = readTail('aio.jsonl', 8000).filter(e => e.sym === sym && e.kind === 'result' && e.at >= cutoff);
+  const res = readTail('aio.jsonl', 8000).filter(e => e.sym === sym && e.kind === 'result' && e.ver === AIO_CFG.ver && e.at >= cutoff);
   function agg(rows) {
     const n = rows.length;
     if (!n) return { n: 0 };
@@ -622,13 +624,14 @@ function aioNow(sym) {
   const snap = snapshots[sym] && snapshots[sym].data;
   if (!(snap && snap.bars && snap.bars.length > AIO_CFG.slow + AIO_CFG.minAway && snap.bars[snap.bars.length - 1].length >= 5)) return null;
   const bars = snap.bars, n = bars.length, closes = bars.map(b => b[4]);
-  const wf = wmaArr(closes, AIO_CFG.fast), ws = wmaArr(closes, AIO_CFG.slow);
-  const up = Math.max(wf[n - 1], ws[n - 1]), lo = Math.min(wf[n - 1], ws[n - 1]);
+  const wf = wmaArr(closes, AIO_CFG.fast), atr = atrArr(bars, AIO_CFG.atrLen);
+  if (wf[n - 1] == null || atr[n - 1] == null) return null;
+  const up = wf[n - 1] + AIO_CFG.bandK * atr[n - 1], lo = wf[n - 1] - AIO_CFG.bandK * atr[n - 1];
   let above = true, below = true;
   for (let k = n - AIO_CFG.minAway; k < n; k++) {
-    const u = Math.max(wf[k], ws[k]), l = Math.min(wf[k], ws[k]);
-    if (closes[k] - u <= 0) above = false;
-    if (closes[k] - l >= 0) below = false;
+    if (wf[k] == null || atr[k] == null) { above = false; below = false; break; }
+    if (closes[k] - (wf[k] + AIO_CFG.bandK * atr[k]) <= 0) above = false;
+    if (closes[k] - (wf[k] - AIO_CFG.bandK * atr[k]) >= 0) below = false;
   }
   return { upper: +up.toFixed(2), lower: +lo.toFixed(2),
     pos: snap.bid > up ? 'above' : snap.bid < lo ? 'below' : 'inside',
@@ -685,7 +688,7 @@ function hypoMatch(base, cond, e) {
 }
 function hypoTest(sym, base, cond, sinceMs) {
   let rows;
-  if (base === 'aio') rows = readTail('aio.jsonl', 8000).filter(e => e.sym === sym && e.kind === 'result');
+  if (base === 'aio') rows = readTail('aio.jsonl', 8000).filter(e => e.sym === sym && e.kind === 'result' && e.ver === AIO_CFG.ver);
   else rows = readTail('events.jsonl', 8000).filter(e => e.sym === sym && (e.type === 'bounce' || e.type === 'break'));
   if (sinceMs) rows = rows.filter(e => e.at > sinceMs);
   const agg = base === 'aio' ? hypoAioStats : hypoEventStats;
