@@ -332,7 +332,7 @@
       <div class="ctxstat" id="ctxstat" style="display:none"></div>
       </div>
       <div class="sighalf aiohalf">
-        <div class="aiohead">WMA BAND 87-100 — เทคนิค #2</div>
+        <div class="aiohead">WMA BAND 87 ± 0.3 ATR — เทคนิค #2</div>
         <div class="aioday" id="aioday"></div>
         <div class="aiostate2" id="aiostate2">—</div>
         <div class="aiosub2" id="aiosub2"></div>
@@ -386,7 +386,7 @@
       <div id="riskbox"></div>
     </div>
     <div class="panel">
-      <div class="ptitle">WMA BAND — เทคนิคทดสอบ #2</div>
+      <div class="ptitle">WMA BAND ± ATR — เทคนิคทดสอบ #2</div>
       <div class="aionow" id="aionow">รอข้อมูล…</div>
       <div class="aiostat" id="aiostat"></div>
     </div>
@@ -408,7 +408,7 @@
       <button class="jsave" onclick="jSave()">จดบันทึก</button>
       <div class="jnav"><button onclick="jDay(-1)">◀</button><span id="jday"></span><button onclick="jDay(1)">▶</button></div>
       <div class="jlist" id="jlist"></div>
-      <div class="footer">MAXX COCKPIT v2.5 · live · กดออเดอร์จริงใน MT5</div>
+      <div class="footer">MAXX COCKPIT v2.7 · live · กดออเดอร์จริงใน MT5</div>
     </div>
   </div>
 </div>
@@ -459,22 +459,26 @@ function etTime(dateObj){
 }
 // AIO band live state (client-side, cached per closed bar) for the split signal card
 function aioBandCalc(d){
+  // band v2: center WMA87, edges +/- 0.3 ATR (always 0.6 ATR apart)
   var bars = d.bars;
   if (!bars || bars.length < 120 || bars[bars.length-1].length < 5) return null;
   var n = bars.length, lastTs = bars[n-1][0], key = S.active + '|' + lastTs;
   if (S._aioC && S._aioC.key === key) return S._aioC;
   var closes = bars.map(function(b){ return b[4]; });
-  function wmaAt(idx, len){ var s = 0, den = len*(len+1)/2; for (var k=0;k<len;k++) s += closes[idx-k]*(len-k); return s/den; }
-  var U = {}, L = {};
-  for (var i = n-6; i < n; i++){ var a = wmaAt(i,87), b = wmaAt(i,100); U[i] = Math.max(a,b); L[i] = Math.min(a,b); }
-  var above = true, below = true;
-  for (var j = n-5; j < n; j++){ if (closes[j] - U[j] <= 0) above = false; if (closes[j] - L[j] >= 0) below = false; }
-  var rma = null;
+  function wmaAt(idx){ var len = 87, s = 0, den = len*(len+1)/2; for (var k=0;k<len;k++) s += closes[idx-k]*(len-k); return s/den; }
+  var atr = new Array(n).fill(null), rma = null;
   for (var t = 1; t < n; t++){
     var tr = Math.max(bars[t][2]-bars[t][3], Math.abs(bars[t][2]-bars[t-1][4]), Math.abs(bars[t][3]-bars[t-1][4]));
-    rma = rma === null ? tr : (rma*13 + tr)/14;
+    rma = rma === null ? tr : (rma*13 + tr)/14; atr[t] = rma;
   }
-  S._aioC = { key: key, upper: U[n-1], lower: L[n-1], atr: rma, armed: above ? 'buy' : below ? 'sell' : null };
+  var K = 0.3, above = true, below = true;
+  for (var j = n-5; j < n; j++){
+    var w = wmaAt(j), u = w + K*atr[j], l = w - K*atr[j];
+    if (closes[j] - u <= 0) above = false;
+    if (closes[j] - l >= 0) below = false;
+  }
+  var wl = wmaAt(n-1);
+  S._aioC = { key: key, upper: wl + K*atr[n-1], lower: wl - K*atr[n-1], atr: atr[n-1], armed: above ? 'buy' : below ? 'sell' : null };
   return S._aioC;
 }
 function renderAioHalf(d, dg){
