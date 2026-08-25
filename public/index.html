@@ -347,6 +347,11 @@
       <div class="plan" id="plan"></div>
     </div>
     <div class="panel">
+      <div class="ptitle">Checklist ก่อนกด — WMA BAND #2 (± 0.3 ATR)</div>
+      <div class="checklist" id="bandchecks"></div>
+      <div class="plan" id="bandplan" style="display:none"></div>
+    </div>
+    <div class="panel">
       <div class="ptitle">Session Map — 24 ชม. ล่าสุด (ET)</div>
       <div class="sesscards" id="sesscards"></div>
       <svg id="sesschart" viewBox="0 0 1000 240" style="width:100%;height:auto;display:block"></svg>
@@ -408,7 +413,7 @@
       <button class="jsave" onclick="jSave()">จดบันทึก</button>
       <div class="jnav"><button onclick="jDay(-1)">◀</button><span id="jday"></span><button onclick="jDay(1)">▶</button></div>
       <div class="jlist" id="jlist"></div>
-      <div class="footer">MAXX COCKPIT v2.7 · live · กดออเดอร์จริงใน MT5</div>
+      <div class="footer">MAXX COCKPIT v2.7.1 · live · กดออเดอร์จริงใน MT5</div>
     </div>
   </div>
 </div>
@@ -522,6 +527,45 @@ function renderAioHalf(d, dg){
     el('aioband2').innerHTML = 'แถบ ' + fmt(a.lower, dg) + ' – ' + fmt(a.upper, dg) + ' · ราคาห่างขอบ ' + fmt(distEdge, dg) + ' pts';
     el('aioplan2').textContent = '';
   }
+}
+// Checklist for WMA Band technique #2 (mirrors the signal chain: day filter -> clean-outside -> side match -> touch)
+function renderBandChecklist(d, dg){
+  var box = el('bandchecks'), planEl = el('bandplan');
+  if (!box) return;
+  function row(pass, cond, who){
+    return '<div class="chk '+(pass?'pass':'fail')+'"><div class="mark">'+(pass?'\u2713':'\u2717')+'</div><div class="cond">'+cond+'</div><div class="who">'+who+'</div></div>';
+  }
+  var a = aioBandCalc(d);
+  if (!a){ box.innerHTML = '<div style="color:var(--dim);font-size:12px;padding:6px 2px">รอข้อมูล bars จาก EA (v0.71 ขึ้นไป)</div>'; planEl.style.display='none'; return; }
+  var d1 = (d.aioD1 && typeof d.aioD1.bias === 'number') ? d.aioD1.bias : null;
+  var h4 = d.h4 ? (d.h4.biasBuy ? 1 : -1) : 0;
+  var filtDir = (d1 !== null && d1 !== 0 && h4 === d1) ? d1 : (d1 === null && h4 !== 0 ? h4 : 0);
+  var filtTxt = d1 === null ? 'H4' : 'D1+H4';
+  var pos = d.bid > a.upper ? 'above' : d.bid < a.lower ? 'below' : 'inside';
+  var armDir = a.armed === 'buy' ? 1 : a.armed === 'sell' ? -1 : 0;
+  var distEdge = pos === 'above' ? d.bid - a.upper : pos === 'below' ? a.lower - d.bid : 0;
+  var rows = '';
+  rows += row(filtDir !== 0,
+    'ฟิลเตอร์ ' + filtTxt + ' ชี้ทางเดียวกัน \u2192 กดได้เฉพาะ ' + (filtDir === 1 ? 'BUY' : filtDir === -1 ? 'SELL' : '\u2014'),
+    filtDir !== 0 ? (filtDir === 1 ? 'BUY' : 'SELL') : (d1 === 0 ? 'D1 พัก \u2014 วันนี้งด' : 'D1/H4 ขัดกัน'));
+  rows += row(armDir !== 0,
+    'ราคาอยู่นอกแถบสะอาดครบ 5 แท่ง (armed)',
+    armDir !== 0 ? 'armed ' + (armDir === 1 ? 'BUY' : 'SELL') : (pos === 'inside' ? 'ราคาอยู่ในแถบ' : 'ยังไม่ครบ 5 แท่ง'));
+  rows += row(armDir !== 0 && filtDir !== 0 && armDir === filtDir,
+    'ฝั่ง armed ตรงกับฝั่งฟิลเตอร์',
+    armDir !== 0 && filtDir !== 0 ? (armDir === filtDir ? 'ตรง' : 'สวนกัน \u2014 สัญญาณจะโดนบล็อก') : '\u2014');
+  rows += row(pos === 'inside' && armDir !== 0,
+    '\u25C6 ราคาย่อแตะแถบ (' + fmt(a.lower, dg) + ' \u2013 ' + fmt(a.upper, dg) + ')',
+    pos === 'inside' ? 'แตะแล้ว' : 'ยังห่าง ' + fmt(distEdge, dg));
+  box.innerHTML = rows;
+  if (armDir !== 0 && filtDir !== 0 && armDir === filtDir){
+    var entry = armDir === 1 ? a.upper : a.lower;
+    var buf = 0.25 * a.atr;
+    var sl = armDir === 1 ? a.lower - buf : a.upper + buf;
+    var risk = Math.abs(entry - sl), tp = entry + armDir * 2 * risk;
+    planEl.style.display = '';
+    planEl.innerHTML = 'แผน: <b>' + (armDir === 1 ? 'BUY' : 'SELL') + '</b> เมื่อแตะ <b>' + fmt(entry, dg) + '</b> \u00B7 SL <b>' + fmt(sl, dg) + '</b> \u00B7 TP(2R) <b>' + fmt(tp, dg) + '</b> \u00B7 ระบบจำลองบันทึกเอง \u00B7 กดจริงใน MT5 ตามดุลยพินิจ';
+  } else planEl.style.display = 'none';
 }
 // MARKET HEAT: direction+strength from M15 bars — vol ratio (2h vs 24h) + Kaufman-style efficiency ratio
 function marketHeat(d){
@@ -752,6 +796,7 @@ function render(){
   el('px').innerHTML = fmt(d.bid, dg) + '<small>' + chgHtml + 'bid · '+etTime(new Date(rec.at))+' ET</small>';
   renderHeat(d, dg);
   renderAioHalf(d, dg);
+  renderBandChecklist(d, dg);
 
   // bias strip
   var up = d.bid > d.h4.wma50;
