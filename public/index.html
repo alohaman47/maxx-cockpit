@@ -414,7 +414,7 @@
       <button class="jsave" onclick="jSave()">จดบันทึก</button>
       <div class="jnav"><button onclick="jDay(-1)">◀</button><span id="jday"></span><button onclick="jDay(1)">▶</button></div>
       <div class="jlist" id="jlist"></div>
-      <div class="footer">MAXX COCKPIT v2.9 · live · กดออเดอร์จริงใน MT5</div>
+      <div class="footer">MAXX COCKPIT v2.9.1 · live · กดออเดอร์จริงใน MT5</div>
     </div>
   </div>
 </div>
@@ -1131,6 +1131,9 @@ function renderJTags(){
 }
 function jSetTag(t){ S.journal.tag = t; renderJTags(); }
 function jStart(s){ var ta = el('jtext'); ta.value = ta.value ? (ta.value.replace(/\s+$/,'') + ' ' + s) : s; ta.focus(); }
+function tDayKey(off){ // MT5 trading day (17:00 ET boundary) - same convention as Risk Desk / calendar
+  return (S._jdf || (S._jdf = new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}))).format(new Date(Date.now() + 7*3600000 + off*86400000));
+}
 function jDayKeyET(off){
   return (S._jdf || (S._jdf = new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}))).format(new Date(Date.now() + off*86400000));
 }
@@ -1217,7 +1220,7 @@ S.tradelog = { dayOffset: 0, rows: [] };
 function tDay(dir){ S.tradelog.dayOffset = Math.min(0, S.tradelog.dayOffset + dir); tLoad(); }
 async function tLoad(){
   try {
-    var j = await jFetch('/api/trades?day=' + jDayKeyET(S.tradelog.dayOffset));
+    var j = await jFetch('/api/trades?day=' + tDayKey(S.tradelog.dayOffset));
     if (!j.ok) return;
     S.tradelog.rows = j.trades || [];
     renderTrades();
@@ -1233,7 +1236,7 @@ function tHold(r){
   return m < 60 ? m + ' น' : Math.floor(m/60) + ' ชม ' + (m%60) + ' น';
 }
 function renderTrades(){
-  el('tday').textContent = S.tradelog.dayOffset === 0 ? 'วันนี้' : jDayKeyET(S.tradelog.dayOffset);
+  el('tday').textContent = S.tradelog.dayOffset === 0 ? 'วันนี้ (MT5)' : tDayKey(S.tradelog.dayOffset);
   var rows = S.tradelog.rows;
   if (!rows.length){
     el('tlsum').innerHTML = '';
