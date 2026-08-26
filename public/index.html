@@ -255,7 +255,7 @@
   <a class="sndbtn" href="/calendar.html" style="text-decoration:none">CALENDAR</a>
   <button class="sndbtn" id="sysbtn" onclick="openSys()">SYSTEM</button>
   <div class="heatchip" id="heatchip"></div>
-  <div class="newschip" id="newschip" onclick="openNewsModal()" style="cursor:pointer" title="กดดูข่าวทั้งหมด + ผลต่อทอง"></div>
+  <div class="newschip" id="newschip" onclick="openNewsModal()" style="cursor:pointer" title="กดดูข่าวทั้งหมด + ผลต่อสินค้าที่เลือก"></div>
   <button class="sndbtn" id="sndbtn">เสียงเตือน · OFF</button>
   <div class="conn"><span class="dot" id="conndot"></span> <span id="conntxt">MT5 BRIDGE</span></div>
   <div class="price" id="px">—<small id="pxsub">รอสัญญาณ</small></div>
@@ -414,7 +414,7 @@
       <button class="jsave" onclick="jSave()">จดบันทึก</button>
       <div class="jnav"><button onclick="jDay(-1)">◀</button><span id="jday"></span><button onclick="jDay(1)">▶</button></div>
       <div class="jlist" id="jlist"></div>
-      <div class="footer">MAXX COCKPIT v2.8 · live · กดออเดอร์จริงใน MT5</div>
+      <div class="footer">MAXX COCKPIT v2.9 · live · กดออเดอร์จริงใน MT5</div>
     </div>
   </div>
 </div>
@@ -430,7 +430,7 @@
 
 <div class="sysmodal" id="newsmodal">
   <div class="sysbox">
-    <h2>NEWS DESK — ข่าว + ผลต่อทองคำ</h2>
+    <h2 id="newsh2">NEWS DESK — ข่าว + ผลต่อทองคำ</h2>
     <div id="newslist"></div>
     <button class="sysclose" onclick="el('newsmodal').classList.remove('show')">ปิด</button>
   </div>
@@ -1555,8 +1555,12 @@ function humanIn(ms){
   if (h < 24) return h + ' ชม ' + (m % 60) + ' น';
   return Math.floor(h / 24) + ' วัน ' + (h % 24) + ' ชม';
 }
+function symLabel(){ return /XAU/i.test(S.active || '') ? 'ทอง' : (S.active || ''); }
+// star thresholds are in price points and were tuned on gold; scale for bigger-tick instruments
+function ptScale(){ var s = (S.active || '').toUpperCase(); return /NAS100|US100|USTEC|NDX/.test(s) ? 6 : /US30|DJ30|DOW/.test(s) ? 12 : /SPX|US500/.test(s) ? 2 : /GER40|DAX|DE40/.test(s) ? 5 : /JPY|JP225|NIKKEI/.test(s) ? 30 : 1; }
 function openNewsModal(){
-  var evs = S.news.events || [], now = Date.now();
+  var evs = S.news.events || [], now = Date.now(), K = ptScale(), L = symLabel();
+  var h2 = el('newsh2'); if (h2) h2.textContent = 'NEWS DESK — ข่าว + ผลต่อ' + (L === 'ทอง' ? 'ทองคำ' : ' ' + L);
   var dg = (S.symbols[S.active] && S.symbols[S.active].data.digits) || 2;
   function row(e){
     var past = e.t <= now;
@@ -1574,14 +1578,14 @@ function openNewsModal(){
     var react = '';
     if (e.reaction){
       var r = e.reaction, c15 = r.p15 > 0 ? 'var(--buy)' : r.p15 < 0 ? 'var(--sell)' : 'var(--dim)';
-      react = '<div style="font-family:var(--mono);font-size:11.5px;margin-top:3px">ทองตอบสนองจริง: <span style="color:' + c15 + ';font-weight:700">' + (r.p15 > 0 ? '+' : '') + r.p15 + ' จุด ใน 15น</span>'
+      react = '<div style="font-family:var(--mono);font-size:11.5px;margin-top:3px">' + L + 'ตอบสนองจริง: <span style="color:' + c15 + ';font-weight:700">' + (r.p15 > 0 ? '+' : '') + r.p15 + ' จุด ใน 15น</span>'
         + (r.p30 != null ? ' · <span style="color:' + (r.p30 > 0 ? 'var(--buy)' : r.p30 < 0 ? 'var(--sell)' : 'var(--dim)') + '">' + (r.p30 > 0 ? '+' : '') + r.p30 + ' ใน 30น</span>' : '') + '</div>';
     }
     var hist = '', stars = '';
     if (e.hist && e.hist.n){
       var h = e.hist;
-      var sc = h.avgAbs15 >= 20 ? 5 : h.avgAbs15 >= 12 ? 4 : h.avgAbs15 >= 7 ? 3 : h.avgAbs15 >= 3.5 ? 2 : 1;
-      var sTip = 'แรงต่อทองจากสถิติของเราเอง: เหวี่ยงเฉลี่ย ' + h.avgAbs15 + ' จุดใน 15 น (เก็บมา ' + h.n + ' ครั้ง)';
+      var sc = h.avgAbs15 >= 20*K ? 5 : h.avgAbs15 >= 12*K ? 4 : h.avgAbs15 >= 7*K ? 3 : h.avgAbs15 >= 3.5*K ? 2 : 1;
+      var sTip = 'แรงต่อ' + L + 'จากสถิติของเราเอง: เหวี่ยงเฉลี่ย ' + h.avgAbs15 + ' จุดใน 15 น (เก็บมา ' + h.n + ' ครั้ง)';
       var scol = sc >= 5 ? '#ff5d76' : sc >= 4 ? '#ff9333' : sc >= 3 ? '#f5c542' : '#25c684';
       var sglow = sc >= 4 ? 'text-shadow:0 0 8px ' + scol + '55;' : '';
       stars = ' <span style="letter-spacing:1.5px;font-size:14px;cursor:default" title="' + sTip + '"><span style="color:' + scol + ';' + sglow + '">' + Array(sc+1).join('★') + '</span><span style="color:#3a4155">' + Array(5-sc+1).join('★') + '</span></span>'
