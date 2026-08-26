@@ -118,7 +118,7 @@
   <div id="dbody"></div>
 </div>
 
-<div class="footer">MAXX COCKPIT v2.8 · P/L CALENDAR · วันตามปฏิทิน ET (New York) นับตามเวลาปิดไม้ · กำไร/ขาดทุนเป็น USD ตาม MT5</div>
+<div class="footer">MAXX COCKPIT v2.9.1 · P/L CALENDAR · วันเทรดแบบ MT5 ตัดวัน 17:00 ET (ตรงกับ Risk Desk) · ไม้หลัง 17:00 ET นับเป็นวันถัดไป · USD รวม swap/commission</div>
 
 <script>
 var Q = { sym: 'ALL', view: 'day', cur: null, selDay: null };
@@ -170,7 +170,7 @@ function setNav(main, sub) { document.getElementById('navlbl').innerHTML = main 
 // ---------- DAY VIEW: month grid ----------
 function renderDay() {
   var y = Q.cur.getUTCFullYear(), m = Q.cur.getUTCMonth();
-  setNav(MTHL[m].toUpperCase() + ' ' + y, 'ปี ' + (y + 543) + ' · กดวันเพื่อดูไม้');
+  setNav(MTHL[m].toUpperCase() + ' ' + y, 'ปี ' + (y + 543) + ' · วันเทรด MT5 (ตัด 17:00 ET) · กดวันเพื่อดูไม้');
   var first = new Date(Date.UTC(y, m, 1)), last = new Date(Date.UTC(y, m + 1, 0));
   var mkeys = []; for (var d = new Date(first.getTime()); d <= last; d = addDays(d, 1)) mkeys.push(ymd(d));
   var a = agg(mkeys); renderCards(a, 'เดือนนี้');
@@ -273,7 +273,7 @@ async function showDay(k) {
   var el = document.querySelector('.cell[data-day="' + k + '"]'); if (el) el.classList.add('picked');
   var box = document.getElementById('detail'), body = document.getElementById('dbody');
   var r = D.days[k] || {};
-  document.getElementById('dtitle').innerHTML = 'ไม้วันที่ ' + thDate(k) + ' — <span class="' + cls(r.net || 0) + '">' + fmt(r.net || 0, true) + ' USD</span> · ' + (r.n || 0) + ' ไม้ · win ' + (r.winRate || 0) + '%' + (r.pf !== undefined ? ' · PF ' + (r.pf === null ? '∞' : r.pf) : '');
+  document.getElementById('dtitle').innerHTML = 'ไม้วันเทรด ' + thDate(k) + ' <span class="chip">17:00 ET วันก่อน → 17:00 ET</span>' + ' — <span class="' + cls(r.net || 0) + '">' + fmt(r.net || 0, true) + ' USD</span> · ' + (r.n || 0) + ' ไม้ · win ' + (r.winRate || 0) + '%' + (r.pf !== undefined ? ' · PF ' + (r.pf === null ? '∞' : r.pf) : '');
   box.style.display = ''; body.innerHTML = '<div class="empty">กำลังโหลด…</div>';
   box.scrollIntoView({ behavior: 'smooth', block: 'start' });
   try {
