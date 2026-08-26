@@ -319,6 +319,8 @@ const hourFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York',
 const dayFmtET = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
 const timeFmtET = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false });
 function etDayKey(ms) { return dayFmtET.format(new Date(ms)); }
+// MT5/Pepperstone trading day: day boundary at 17:00 ET (NY close) -> key = ET date of (t + 7h). Matches Risk Desk dayPL.
+function tradingDayKey(ms) { return dayFmtET.format(new Date(ms + 7 * 3600000)); }
 function sessOf(ts) {
   const h = parseInt(hourFmt.format(new Date(ts * 1000)), 10) % 24;
   if (h >= 19 || h < 3) return 'ASIA';
@@ -1500,7 +1502,7 @@ app.get('/api/trades', (req, res) => {
   for (const e of readTail('journal.jsonl', 1500)) if (e.pos) notes[e.pos] = { at: e.at, text: e.text, setup: e.setup || null, tag: e.tag };
   for (const r of rows) if (notes[r.pos]) r.note = notes[r.pos];
   const day = req.query.day;
-  const filt = day ? rows.filter(r => etDayKey(r.closeAt || r.openAt || 0) === day) : rows.slice(-80);
+  const filt = day ? rows.filter(r => tradingDayKey(r.closeAt || r.openAt || 0) === day) : rows.slice(-80);
   res.json({ ok: true, trades: filt });
 });
 
@@ -1515,7 +1517,7 @@ app.get('/api/pnl', (req, res) => {
     if (e.kind !== 'close' || typeof e.pl !== 'number' || !isFinite(e.pl)) continue;
     if (e.sym) syms.add(e.sym);
     if (sym && e.sym !== sym) continue;
-    const k = etDayKey(e.at);
+    const k = tradingDayKey(e.at);
     const d = days[k] || (days[k] = { net: 0, n: 0, w: 0, l: 0, gw: 0, gl: 0, best: null, worst: null, lots: 0 });
     d.net += e.pl; d.n++; d.lots += Number(e.lot) || 0;
     if (e.pl > 0) { d.w++; d.gw += e.pl; } else if (e.pl < 0) { d.l++; d.gl += -e.pl; }
@@ -1530,7 +1532,7 @@ app.get('/api/pnl', (req, res) => {
   }
   const keys = Object.keys(days).sort();
   res.json({ ok: true, sym: sym || 'ALL', syms: [...syms].sort(), days, first: keys[0] || null, last: keys[keys.length - 1] || null,
-    today: etDayKey(Date.now()), note: 'วันตามปฏิทิน ET (New York) — นับไม้ตามเวลาปิดไม้ เหมือน TRADE LOG' });
+    today: tradingDayKey(Date.now()), note: 'วันเทรดแบบ MT5 — ตัดวันที่ 17:00 ET (NY close) ตรงกับ Risk Desk และ TRADE LOG' });
 });
 
 app.get('/api/journal', (req, res) => {
