@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MAXX P/L CALENDAR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@400;500;600;700&family=Cinzel:wght@600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#08090d; --panel:#10131a; --panel2:#161a24; --line:#242938;
+    --hair:rgba(233,208,138,.16); --hair2:rgba(233,208,138,.4);
+    --text:#eceef2; --dim:#8f96a5;
+    --buy:#25c684; --sell:#f0506a; --wait:#f5c542; --gold:#d9b24a; --gold2:#e9d08a;
+    --mono:'JetBrains Mono',ui-monospace,Consolas,monospace;
+    --serif:'Cinzel','Anuphan',serif;
+    --thai:'Anuphan',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:radial-gradient(1100px 520px at 72% -8%,rgba(217,178,74,.055),transparent 60%),var(--bg);color:var(--text);font-family:var(--thai);min-height:100vh;padding:16px}
+  .topbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:12px 18px;background:linear-gradient(180deg,#151823,#0e1117);border:1px solid var(--hair);border-radius:14px;margin-bottom:14px;box-shadow:0 1px 0 rgba(233,208,138,.22) inset}
+  .brand{font-family:var(--serif);font-weight:700;letter-spacing:.2em;font-size:15px}
+  .brand span{background:linear-gradient(120deg,#f3e4ad,#d9b24a 48%,#a87f2c);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .back{font-size:12px;color:var(--dim);text-decoration:none;border:1px solid var(--line);padding:6px 12px;border-radius:8px}
+  .back:hover{color:#ecd9a0;border-color:var(--hair2)}
+  .spacer{flex:1}
+  .sel{display:flex;gap:6px}
+  .selbtn{white-space:nowrap;padding:6px 13px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--dim);font-size:12px;font-weight:600;cursor:pointer;font-family:var(--thai)}
+  .selbtn.active{background:linear-gradient(120deg,rgba(217,178,74,.18),rgba(217,178,74,.05));color:#ecd9a0;border-color:var(--hair2)}
+  .selbtn:focus-visible{outline:2px solid var(--gold2);outline-offset:2px}
+  .panel{background:linear-gradient(180deg,#141822,#0e1016);border:1px solid var(--hair);border-radius:14px;padding:17px;box-shadow:0 1px 0 rgba(233,208,138,.2) inset;margin-bottom:14px}
+  .ptitle{font-size:10.5px;letter-spacing:.24em;color:#a79c80;font-weight:600;margin-bottom:14px;text-transform:uppercase}
+  .nav{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+  .navbtn{width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--gold2);font-size:16px;cursor:pointer;font-family:var(--mono)}
+  .navbtn:hover{border-color:var(--hair2)}
+  .navlbl{font-family:var(--serif);font-size:18px;letter-spacing:.12em;color:var(--gold2);min-width:220px;text-align:center}
+  .navlbl small{display:block;font-family:var(--thai);font-size:11px;letter-spacing:.06em;color:var(--dim);margin-top:2px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px}
+  .kcard{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px 13px}
+  .kcard .kl{font-size:10.5px;letter-spacing:.14em;color:var(--dim);text-transform:uppercase}
+  .kcard .kv{font-family:var(--mono);font-size:20px;font-weight:700;margin-top:4px;color:var(--gold2)}
+  .kcard .ks{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:2px}
+  .pos{color:var(--buy)} .neg{color:var(--sell)} .mid{color:var(--wait)}
+  /* calendar grid: 7 days + week total column */
+  .cal{display:grid;grid-template-columns:repeat(7,1fr) 1.15fr;gap:6px}
+  .dow{font-size:10.5px;letter-spacing:.16em;color:var(--dim);text-align:center;padding:4px 0 6px;text-transform:uppercase;font-weight:600}
+  .dow.wk{color:#a79c80}
+  .cell{position:relative;min-height:84px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);padding:8px 9px;cursor:default;transition:border-color .15s}
+  .cell.has{cursor:pointer}
+  .cell.has:hover{border-color:var(--hair2)}
+  .cell.out{opacity:.28}
+  .cell.wknd{background:#12151d}
+  .cell.today{border-color:var(--gold);box-shadow:0 0 0 1px rgba(217,178,74,.35) inset}
+  .cell.picked{border-color:var(--gold2);box-shadow:0 0 0 1px rgba(233,208,138,.6) inset}
+  .cell.up{background:linear-gradient(180deg,rgba(37,198,132,var(--a)),rgba(37,198,132,.04))}
+  .cell.dn{background:linear-gradient(180deg,rgba(240,80,106,var(--a)),rgba(240,80,106,.04))}
+  .cell .dn1{font-family:var(--mono);font-size:11px;color:var(--dim)}
+  .cell.today .dn1{color:var(--gold2);font-weight:700}
+  .cell .net{font-family:var(--mono);font-size:15px;font-weight:700;margin-top:10px;letter-spacing:-.01em}
+  .cell .sub{font-family:var(--mono);font-size:10.5px;color:var(--dim);margin-top:3px}
+  .cell.wtot{background:linear-gradient(180deg,#191d29,#12151d);border-color:var(--hair)}
+  .cell.wtot .dn1{color:#a79c80;letter-spacing:.1em;font-size:10px}
+  .cell.wtot .net{font-size:14px}
+  .cell .dot{position:absolute;top:8px;right:9px;width:6px;height:6px;border-radius:50%}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+  th{text-align:right;color:var(--dim);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line);font-size:10.5px;letter-spacing:.08em}
+  th:first-child,td:first-child{text-align:left}
+  td{text-align:right;padding:7px 8px;border-bottom:1px solid rgba(36,41,56,.5)}
+  tr.rowlink{cursor:pointer} tr.rowlink:hover td{background:rgba(233,208,138,.04)}
+  .btrack{display:inline-block;width:110px;height:8px;background:#0c0e14;border-radius:4px;vertical-align:middle;position:relative;overflow:hidden}
+  .btrack i{position:absolute;top:0;bottom:0;border-radius:4px}
+  .btrack i.up{left:50%;background:linear-gradient(90deg,#1f9f6c,#25c684)}
+  .btrack i.dn{right:50%;background:linear-gradient(90deg,#f0506a,#b03a4e)}
+  .empty{color:var(--dim);font-size:12.5px;font-family:var(--mono);padding:8px 0}
+  .warn{display:none;margin-bottom:14px;padding:12px 16px;border-radius:12px;border:1px solid rgba(245,197,66,.5);background:linear-gradient(90deg,rgba(245,197,66,.12),transparent);color:var(--wait);font-size:13px}
+  .trow{display:grid;grid-template-columns:76px 60px 1fr auto;gap:10px;align-items:center;padding:8px 4px;border-bottom:1px solid rgba(36,41,56,.5);font-family:var(--mono);font-size:12px}
+  .trow .tm{color:var(--dim)} .trow .dir{font-weight:700} .trow .pl{font-weight:700;text-align:right}
+  .trow .meta{color:var(--dim);font-size:11px} .trow .note{color:#ecd9a0;font-family:var(--thai);font-size:12px;grid-column:1/-1;padding-left:6px}
+  .chip{display:inline-block;padding:1px 7px;border-radius:5px;border:1px solid var(--line);font-size:10px;letter-spacing:.06em;color:var(--dim);margin-left:6px}
+  .footer{margin-top:14px;text-align:center;font-size:11px;color:var(--dim);font-family:var(--mono)}
+  @media (max-width:820px){ #rangenote{display:none} .navlbl{flex:1} .cal{gap:3px} .cell{min-height:64px;padding:5px 5px} .cell .net{font-size:11.5px;margin-top:6px} .cell .sub{display:none} .navlbl{min-width:150px;font-size:14px} }
+  @media (prefers-reduced-motion:reduce){ *{transition:none!important} }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">MAXX <span>P/L CALENDAR</span></div>
+  <a class="back" href="/">← COCKPIT</a>
+  <a class="back" href="/quant.html">QUANT LAB</a>
+  <div class="spacer"></div>
+  <div class="sel" id="symsel"></div>
+  <div class="sel" id="viewsel">
+    <button class="selbtn active" data-v="day">รายวัน</button>
+    <button class="selbtn" data-v="week">รายสัปดาห์</button>
+    <button class="selbtn" data-v="month">รายเดือน</button>
+  </div>
+</div>
+
+<div class="warn" id="warn"></div>
+
+<div class="panel">
+  <div class="nav">
+    <button class="navbtn" id="prev" aria-label="ก่อนหน้า">‹</button>
+    <div class="navlbl" id="navlbl">—</div>
+    <button class="navbtn" id="next" aria-label="ถัดไป">›</button>
+    <button class="selbtn" id="today" style="margin-left:4px">วันนี้</button>
+    <div class="spacer"></div>
+    <div id="rangenote" style="font-size:11px;color:var(--dim);font-family:var(--mono)"></div>
+  </div>
+  <div class="cards" id="cards"></div>
+  <div id="body"></div>
+</div>
+
+<div class="panel" id="detail" style="display:none">
+  <div class="ptitle" id="dtitle">ไม้ในวันนี้</div>
+  <div id="dbody"></div>
+</div>
+
+<div class="footer">MAXX COCKPIT v2.8 · P/L CALENDAR · วันตามปฏิทิน ET (New York) นับตามเวลาปิดไม้ · กำไร/ขาดทุนเป็น USD ตาม MT5</div>
+
+<script>
+var Q = { sym: 'ALL', view: 'day', cur: null, selDay: null };
+var D = { days: {}, first: null, last: null, today: null, syms: [] };
+var DOWS = ['จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส', 'อา'];
+var MTH = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+var MTHL = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+
+function pinHeaders() { var h = {}; try { var pn = localStorage.getItem('dashpin'); if (pn) h['X-DASH-PIN'] = pn; } catch (e) {} return h; }
+function ymd(d) { return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0'); }
+function parseKey(k) { return new Date(k + 'T00:00:00Z'); }
+function addDays(d, n) { var x = new Date(d.getTime()); x.setUTCDate(x.getUTCDate() + n); return x; }
+function mondayOf(d) { var wd = (d.getUTCDay() + 6) % 7; return addDays(d, -wd); }
+function fmt(v, sign) { if (v === null || v === undefined) return '—'; var s = (sign && v > 0 ? '+' : '') + v.toFixed(2); return s; }
+function cls(v) { return v > 0 ? 'pos' : v < 0 ? 'neg' : 'mid'; }
+function thDate(k) { var d = parseKey(k); return d.getUTCDate() + ' ' + MTH[d.getUTCMonth()] + ' ' + (d.getUTCFullYear() + 543); }
+function etTime(ms) { return new Intl.DateTimeFormat('en-GB', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(ms)); }
+
+function agg(keys) {
+  var a = { net: 0, n: 0, w: 0, l: 0, gw: 0, gl: 0, days: 0, up: 0, dn: 0, best: null, bestK: null, worst: null, worstK: null };
+  keys.forEach(function (k) {
+    var d = D.days[k]; if (!d) return;
+    a.net += d.net; a.n += d.n; a.w += d.w; a.l += d.l; a.gw += d.gw; a.gl += d.gl; a.days++;
+    if (d.net > 0) a.up++; else if (d.net < 0) a.dn++;
+    if (a.best === null || d.net > a.best) { a.best = d.net; a.bestK = k; }
+    if (a.worst === null || d.net < a.worst) { a.worst = d.net; a.worstK = k; }
+  });
+  a.winRate = a.n ? Math.round(100 * a.w / a.n) : 0;
+  a.pf = a.gl > 0 ? a.gw / a.gl : (a.gw > 0 ? Infinity : 0);
+  a.avgDay = a.days ? a.net / a.days : 0;
+  return a;
+}
+
+function renderCards(a, label) {
+  var pf = a.pf === Infinity ? '∞' : a.pf.toFixed(2);
+  document.getElementById('cards').innerHTML = [
+    ['กำไรสุทธิ ' + label, '<span class="' + cls(a.net) + '">' + fmt(a.net, true) + '</span>', 'USD'],
+    ['วันที่เทรด', a.days, '<span class="pos">' + a.up + ' เขียว</span> · <span class="neg">' + a.dn + ' แดง</span>'],
+    ['ไม้ทั้งหมด', a.n, 'ชนะ ' + a.w + ' · แพ้ ' + a.l],
+    ['WIN RATE', a.winRate + '%', 'PF ' + pf],
+    ['เฉลี่ย/วัน', '<span class="' + cls(a.avgDay) + '">' + fmt(a.avgDay, true) + '</span>', 'USD ต่อวันที่เทรด'],
+    ['วันดีสุด', '<span class="' + cls(a.best) + '">' + fmt(a.best, true) + '</span>', a.bestK ? thDate(a.bestK) : '—'],
+    ['วันแย่สุด', '<span class="' + cls(a.worst) + '">' + fmt(a.worst, true) + '</span>', a.worstK ? thDate(a.worstK) : '—']
+  ].map(function (c) { return '<div class="kcard"><div class="kl">' + c[0] + '</div><div class="kv">' + c[1] + '</div><div class="ks">' + c[2] + '</div></div>'; }).join('');
+}
+
+function setNav(main, sub) { document.getElementById('navlbl').innerHTML = main + '<small>' + (sub || '') + '</small>'; }
+
+// ---------- DAY VIEW: month grid ----------
+function renderDay() {
+  var y = Q.cur.getUTCFullYear(), m = Q.cur.getUTCMonth();
+  setNav(MTHL[m].toUpperCase() + ' ' + y, 'ปี ' + (y + 543) + ' · กดวันเพื่อดูไม้');
+  var first = new Date(Date.UTC(y, m, 1)), last = new Date(Date.UTC(y, m + 1, 0));
+  var mkeys = []; for (var d = new Date(first.getTime()); d <= last; d = addDays(d, 1)) mkeys.push(ymd(d));
+  var a = agg(mkeys); renderCards(a, 'เดือนนี้');
+  var maxAbs = 0; mkeys.forEach(function (k) { if (D.days[k]) maxAbs = Math.max(maxAbs, Math.abs(D.days[k].net)); });
+  var html = '<div class="cal">' + DOWS.map(function (s) { return '<div class="dow">' + s + '</div>'; }).join('') + '<div class="dow wk">สัปดาห์</div>';
+  var start = mondayOf(first), end = addDays(mondayOf(last), 6);
+  for (var w = new Date(start.getTime()); w <= end; w = addDays(w, 7)) {
+    var wkeys = [];
+    for (var i = 0; i < 7; i++) {
+      var dd = addDays(w, i), k = ymd(dd), inM = dd.getUTCMonth() === m, r = D.days[k];
+      wkeys.push(k);
+      var c = 'cell' + (inM ? '' : ' out') + (i >= 5 ? ' wknd' : '') + (k === D.today ? ' today' : '') + (k === Q.selDay ? ' picked' : '');
+      var style = '';
+      if (r && inM) {
+        c += ' has ' + (r.net > 0 ? 'up' : r.net < 0 ? 'dn' : '');
+        style = ' style="--a:' + (0.08 + 0.3 * Math.min(1, Math.abs(r.net) / (maxAbs || 1))).toFixed(2) + '"';
+      }
+      html += '<div class="' + c + '"' + style + (r && inM ? ' data-day="' + k + '" role="button" tabindex="0"' : '') + '>' +
+        '<div class="dn1">' + dd.getUTCDate() + '</div>' +
+        (r && inM ? '<div class="net ' + cls(r.net) + '">' + fmt(r.net, true) + '</div><div class="sub">' + r.n + ' ไม้ · ' + r.winRate + '%</div>' : '') +
+        '</div>';
+    }
+    var wa = agg(wkeys.filter(function (k) { return parseKey(k).getUTCMonth() === m; }));
+    html += '<div class="cell wtot"><div class="dn1">WEEK</div>' + (wa.n ? '<div class="net ' + cls(wa.net) + '">' + fmt(wa.net, true) + '</div><div class="sub">' + wa.days + ' วัน · ' + wa.n + ' ไม้ · ' + wa.winRate + '%</div>' : '<div class="sub" style="margin-top:12px">—</div>') + '</div>';
+  }
+  html += '</div>';
+  if (!a.n) html += '<div class="empty" style="margin-top:12px">ยังไม่มีไม้ปิดในเดือนนี้' + (D.first ? ' — ข้อมูลเริ่มบันทึกตั้งแต่ ' + thDate(D.first) : ' — ระบบจะบันทึกอัตโนมัติเมื่อ EA ส่งดีลปิดไม้เข้ามา') + '</div>';
+  document.getElementById('body').innerHTML = html;
+  document.querySelectorAll('.cell.has').forEach(function (el) {
+    el.addEventListener('click', function () { showDay(el.getAttribute('data-day')); });
+    el.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); showDay(el.getAttribute('data-day')); } });
+  });
+}
+
+// ---------- WEEK VIEW: 12 weeks ending in the selected month ----------
+function renderWeek() {
+  var y = Q.cur.getUTCFullYear(), m = Q.cur.getUTCMonth();
+  var lastD = new Date(Date.UTC(y, m + 1, 0)), endMon = mondayOf(lastD);
+  var todayMon = mondayOf(parseKey(D.today || ymd(new Date())));
+  if (endMon > todayMon) endMon = todayMon; // never list weeks that haven't started yet
+  var rows = [];
+  for (var i = 0; i < 12; i++) {
+    var mon = addDays(endMon, -7 * i), keys = []; for (var j = 0; j < 7; j++) keys.push(ymd(addDays(mon, j)));
+    rows.push({ mon: mon, keys: keys, a: agg(keys) });
+  }
+  var all = agg([].concat.apply([], rows.map(function (r) { return r.keys; })));
+  setNav('12 สัปดาห์', 'ถึงสัปดาห์ของ ' + MTH[m] + ' ' + (y + 543));
+  renderCards(all, '12 สัปดาห์');
+  var maxAbs = 0; rows.forEach(function (r) { maxAbs = Math.max(maxAbs, Math.abs(r.a.net)); });
+  var html = '<table><tr><th>สัปดาห์ (จ–อา)</th><th>วันเทรด</th><th>ไม้</th><th>WIN%</th><th>PF</th><th>วันดีสุด</th><th>วันแย่สุด</th><th>สุทธิ USD</th><th></th></tr>';
+  rows.forEach(function (r) {
+    var a = r.a, pct = maxAbs ? Math.abs(a.net) / maxAbs * 50 : 0;
+    var lbl = r.mon.getUTCDate() + ' ' + MTH[r.mon.getUTCMonth()] + ' – ' + addDays(r.mon, 6).getUTCDate() + ' ' + MTH[addDays(r.mon, 6).getUTCMonth()];
+    var isCur = D.today && mondayOf(parseKey(D.today)).getTime() === r.mon.getTime();
+    html += '<tr class="rowlink" data-mon="' + ymd(r.mon) + '"><td>' + lbl + (isCur ? '<span class="chip">สัปดาห์นี้</span>' : '') + '</td>' +
+      (a.n ? '<td>' + a.days + '</td><td>' + a.n + '</td><td>' + a.winRate + '%</td><td>' + (a.pf === Infinity ? '∞' : a.pf.toFixed(2)) + '</td><td class="' + cls(a.best) + '">' + fmt(a.best, true) + '</td><td class="' + cls(a.worst) + '">' + fmt(a.worst, true) + '</td><td class="' + cls(a.net) + '"><b>' + fmt(a.net, true) + '</b></td>' +
+        '<td><span class="btrack"><i class="' + (a.net >= 0 ? 'up' : 'dn') + '" style="width:' + pct.toFixed(1) + '%"></i></span></td>'
+        : '<td colspan="8" class="empty" style="text-align:right;padding:7px 8px">ไม่มีไม้</td>') + '</tr>';
+  });
+  html += '</table>';
+  document.getElementById('body').innerHTML = html;
+  document.querySelectorAll('tr.rowlink').forEach(function (tr) {
+    tr.addEventListener('click', function () { Q.cur = parseKey(tr.getAttribute('data-mon')); Q.cur = new Date(Date.UTC(Q.cur.getUTCFullYear(), Q.cur.getUTCMonth(), 1)); setView('day'); });
+  });
+}
+
+// ---------- MONTH VIEW: whole year ----------
+function renderMonth() {
+  var y = Q.cur.getUTCFullYear();
+  setNav('ปี ' + y, 'พ.ศ. ' + (y + 543) + ' · กดเดือนเพื่อดูปฏิทิน');
+  var rows = [], cum = 0, ykeys = [];
+  for (var m = 0; m < 12; m++) {
+    var keys = [], last = new Date(Date.UTC(y, m + 1, 0));
+    for (var d = new Date(Date.UTC(y, m, 1)); d <= last; d = addDays(d, 1)) keys.push(ymd(d));
+    ykeys = ykeys.concat(keys);
+    rows.push({ m: m, a: agg(keys) });
+  }
+  renderCards(agg(ykeys), 'ปี ' + y);
+  var maxAbs = 0; rows.forEach(function (r) { maxAbs = Math.max(maxAbs, Math.abs(r.a.net)); });
+  var html = '<table><tr><th>เดือน</th><th>วันเทรด</th><th>ไม้</th><th>WIN%</th><th>PF</th><th>เฉลี่ย/วัน</th><th>สุทธิ USD</th><th>สะสมทั้งปี</th><th></th></tr>';
+  rows.forEach(function (r) {
+    var a = r.a, pct = maxAbs ? Math.abs(a.net) / maxAbs * 50 : 0;
+    cum += a.net;
+    html += '<tr class="rowlink" data-m="' + r.m + '"><td>' + MTHL[r.m] + '</td>' +
+      (a.n ? '<td>' + a.days + '</td><td>' + a.n + '</td><td>' + a.winRate + '%</td><td>' + (a.pf === Infinity ? '∞' : a.pf.toFixed(2)) + '</td><td class="' + cls(a.avgDay) + '">' + fmt(a.avgDay, true) + '</td><td class="' + cls(a.net) + '"><b>' + fmt(a.net, true) + '</b></td><td class="' + cls(cum) + '">' + fmt(cum, true) + '</td>' +
+        '<td><span class="btrack"><i class="' + (a.net >= 0 ? 'up' : 'dn') + '" style="width:' + pct.toFixed(1) + '%"></i></span></td>'
+        : '<td colspan="8" class="empty" style="text-align:right;padding:7px 8px">—</td>') + '</tr>';
+  });
+  html += '</table>';
+  document.getElementById('body').innerHTML = html;
+  document.querySelectorAll('tr.rowlink').forEach(function (tr) {
+    tr.addEventListener('click', function () { Q.cur = new Date(Date.UTC(y, parseInt(tr.getAttribute('data-m'), 10), 1)); setView('day'); });
+  });
+}
+
+// ---------- day detail: trades of one ET day (joins TRADE LOG + per-trade notes) ----------
+async function showDay(k) {
+  Q.selDay = k;
+  document.querySelectorAll('.cell.picked').forEach(function (el) { el.classList.remove('picked'); });
+  var el = document.querySelector('.cell[data-day="' + k + '"]'); if (el) el.classList.add('picked');
+  var box = document.getElementById('detail'), body = document.getElementById('dbody');
+  var r = D.days[k] || {};
+  document.getElementById('dtitle').innerHTML = 'ไม้วันที่ ' + thDate(k) + ' — <span class="' + cls(r.net || 0) + '">' + fmt(r.net || 0, true) + ' USD</span> · ' + (r.n || 0) + ' ไม้ · win ' + (r.winRate || 0) + '%' + (r.pf !== undefined ? ' · PF ' + (r.pf === null ? '∞' : r.pf) : '');
+  box.style.display = ''; body.innerHTML = '<div class="empty">กำลังโหลด…</div>';
+  box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  try {
+    var j = await (await fetch('/api/trades?day=' + k, { headers: pinHeaders() })).json();
+    var tr = (j.trades || []).filter(function (t) { return t.pl !== null && (Q.sym === 'ALL' || t.sym === Q.sym); }).sort(function (a, b) { return (a.closeAt || 0) - (b.closeAt || 0); });
+    if (!tr.length) { body.innerHTML = '<div class="empty">ไม่มีรายละเอียดไม้ของวันนี้ใน TRADE LOG</div>'; return; }
+    body.innerHTML = tr.map(function (t) {
+      var sys = t.ctx && t.ctx.inZone && t.ctx.bounce && t.ctx.stackOk && t.ctx.sarOk;
+      var hold = t.openAt && t.closeAt ? Math.round((t.closeAt - t.openAt) / 60000) : null;
+      return '<div class="trow"><div class="tm">' + (t.closeAt ? etTime(t.closeAt) : '--:--') + ' ET</div>' +
+        '<div class="dir ' + (t.dir === 'buy' ? 'pos' : 'neg') + '">' + (t.dir || '?').toUpperCase() + ' ' + (t.lot || '') + '</div>' +
+        '<div class="meta">' + (t.sym || '') + ' ' + (t.openPrice || '?') + ' → ' + (t.closePrice || '?') + (hold !== null ? ' · ถือ ' + hold + ' น' : '') + (t.ctx && t.ctx.grade ? ' · grade ' + t.ctx.grade : '') + (t.ctx ? '<span class="chip">' + (sys ? 'ตามระบบ' : 'นอกระบบ') + '</span>' : '') + (t.note && t.note.setup ? '<span class="chip" style="color:#ecd9a0">' + t.note.setup + '</span>' : '') + '</div>' +
+        '<div class="pl ' + cls(t.pl) + '">' + fmt(t.pl, true) + '</div>' +
+        (t.note && t.note.text ? '<div class="note">“' + t.note.text.replace(/</g, '&lt;') + '”</div>' : '') + '</div>';
+    }).join('');
+  } catch (e) { body.innerHTML = '<div class="empty">โหลดรายละเอียดไม่ได้: ' + e.message + '</div>'; }
+}
+
+function render() {
+  document.getElementById('detail').style.display = (Q.view === 'day' && Q.selDay) ? '' : 'none';
+  document.getElementById('rangenote').textContent = D.first ? 'บันทึกตั้งแต่ ' + thDate(D.first) + ' ถึง ' + thDate(D.last) + ' · ' + Q.sym : 'ยังไม่มีข้อมูล';
+  if (Q.view === 'day') renderDay(); else if (Q.view === 'week') renderWeek(); else renderMonth();
+}
+function setView(v) {
+  Q.view = v;
+  document.querySelectorAll('#viewsel .selbtn').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-v') === v); });
+  render();
+}
+function shift(n) {
+  var y = Q.cur.getUTCFullYear(), m = Q.cur.getUTCMonth();
+  Q.cur = Q.view === 'month' ? new Date(Date.UTC(y + n, m, 1)) : new Date(Date.UTC(y, m + n, 1));
+  render();
+}
+async function load() {
+  var w = document.getElementById('warn'); w.style.display = 'none';
+  try {
+    var j = await (await fetch('/api/pnl?sym=' + encodeURIComponent(Q.sym), { headers: pinHeaders() })).json();
+    if (!j.ok) throw new Error(j.error || 'bad response');
+    D = j;
+    if (!Q.cur) { var t = parseKey(D.today || ymd(new Date())); Q.cur = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), 1)); }
+    var ss = document.getElementById('symsel');
+    ss.innerHTML = ['ALL'].concat(D.syms || []).map(function (s) { return '<button class="selbtn' + (s === Q.sym ? ' active' : '') + '" data-s="' + s + '">' + s + '</button>'; }).join('');
+    ss.querySelectorAll('.selbtn').forEach(function (b) { b.addEventListener('click', function () { Q.sym = b.getAttribute('data-s'); Q.selDay = null; load(); }); });
+    render();
+  } catch (e) {
+    w.style.display = ''; w.textContent = 'โหลดข้อมูลไม่ได้: ' + e.message + (e.message.indexOf('pin') >= 0 ? ' — ตั้ง PIN ในหน้า COCKPIT ก่อน' : '');
+  }
+}
+document.getElementById('prev').addEventListener('click', function () { shift(-1); });
+document.getElementById('next').addEventListener('click', function () { shift(1); });
+document.getElementById('today').addEventListener('click', function () { var t = parseKey(D.today || ymd(new Date())); Q.cur = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), 1)); Q.selDay = D.today; render(); if (Q.view === 'day' && D.days[D.today]) showDay(D.today); });
+document.querySelectorAll('#viewsel .selbtn').forEach(function (b) { b.addEventListener('click', function () { setView(b.getAttribute('data-v')); }); });
+load();
+setInterval(load, 120000);
+</script>
+</body>
+</html>
