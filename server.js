@@ -1495,6 +1495,35 @@ app.get('/api/trades', (req, res) => {
   res.json({ ok: true, trades: filt });
 });
 
+// ---------- P/L CALENDAR (v2.8): daily / weekly / monthly aggregation of closed trades, ET days ----------
+const wdFmtET = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short' });
+app.get('/api/pnl', (req, res) => {
+  if (!pinOk(req)) return res.status(401).json({ ok: false, error: 'bad pin' });
+  const sym = req.query.sym && req.query.sym !== 'ALL' ? req.query.sym : null;
+  const all = readTail('trades.jsonl', 500000);
+  const days = {}, syms = new Set();
+  for (const e of all) {
+    if (e.kind !== 'close' || typeof e.pl !== 'number' || !isFinite(e.pl)) continue;
+    if (e.sym) syms.add(e.sym);
+    if (sym && e.sym !== sym) continue;
+    const k = etDayKey(e.at);
+    const d = days[k] || (days[k] = { net: 0, n: 0, w: 0, l: 0, gw: 0, gl: 0, best: null, worst: null, lots: 0 });
+    d.net += e.pl; d.n++; d.lots += Number(e.lot) || 0;
+    if (e.pl > 0) { d.w++; d.gw += e.pl; } else if (e.pl < 0) { d.l++; d.gl += -e.pl; }
+    d.best = d.best === null ? e.pl : Math.max(d.best, e.pl);
+    d.worst = d.worst === null ? e.pl : Math.min(d.worst, e.pl);
+  }
+  for (const k of Object.keys(days)) {
+    const d = days[k];
+    d.net = +d.net.toFixed(2); d.gw = +d.gw.toFixed(2); d.gl = +d.gl.toFixed(2); d.lots = +d.lots.toFixed(2);
+    d.winRate = d.n ? Math.round(100 * d.w / d.n) : 0;
+    d.pf = d.gl > 0 ? +(d.gw / d.gl).toFixed(2) : (d.gw > 0 ? null : 0);
+  }
+  const keys = Object.keys(days).sort();
+  res.json({ ok: true, sym: sym || 'ALL', syms: [...syms].sort(), days, first: keys[0] || null, last: keys[keys.length - 1] || null,
+    today: etDayKey(Date.now()), note: 'วันตามปฏิทิน ET (New York) — นับไม้ตามเวลาปิดไม้ เหมือน TRADE LOG' });
+});
+
 app.get('/api/journal', (req, res) => {
   if (!pinOk(req)) return res.status(401).json({ ok: false, error: 'bad pin' });
   const all = readTail('journal.jsonl', 1000);
