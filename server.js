@@ -17,6 +17,7 @@ const KIMI_URL = (process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1').rep
 const KIMI_MODEL = process.env.KIMI_MODEL || 'moonshot-v1-8k';
 
 const snapshots = {}; // symbol -> { data, at }
+let dealSeenAll = null; // global deal-id dedupe across all EA instances (v2.9)
 const clients = new Set();
 const aiState = {};   // symbol -> { lastAutoAt }
 
@@ -214,23 +215,27 @@ function record(sym, prev, d) {
     }
     // account deals -> trade attribution log (real trades with setup context)
     if (Array.isArray(d.deals) && d.deals.length) {
-      if (!st.dealSeen)
-        st.dealSeen = new Set(readTail('trades.jsonl', 800).map(t => t.id).filter(Boolean));
+      if (!dealSeenAll)
+        dealSeenAll = new Set(readTail('trades.jsonl', 5000).map(t => t.id).filter(Boolean));
       for (const dl of d.deals) {
-        if (!dl.id || st.dealSeen.has(dl.id)) continue;
-        st.dealSeen.add(dl.id);
-        const base = { at: now, id: dl.id, pos: dl.pos, sym: dl.symd || sym, dir: dl.dir,
+        if (!dl.id || dealSeenAll.has(dl.id)) continue;
+        // v2.9 multi-symbol: every EA instance sees all account deals -> the instance whose chart
+        // symbol matches the deal owns it (correct ctx + bars); others skip while the owner feed is live.
+        const dsym = dl.symd || sym;
+        if (dsym !== sym && snapshots[dsym] && (now - snapshots[dsym].at) < 120000) continue;
+        dealSeenAll.add(dl.id);
+        const base = { at: now, id: dl.id, pos: dl.pos, sym: dsym, dir: dl.dir,
                        price: dl.price, lot: dl.lot, t: dl.t };
         if (dl.e === 'in') {
           if (!st.openTrades) st.openTrades = {};
           st.openTrades[dl.pos] = { t: dl.t, price: dl.price, dir: dl.dir };
           logAppend('trades.jsonl', Object.assign(base, { kind: 'open', ctx: {
-            conf, grade: conf >= 80 ? 'A' : conf >= 65 ? 'B' : conf >= 50 ? 'C' : 'D',
+            conf, grade: conf >= 80 ? 'A' : conf >= 65 ? 'B' : conf >= 50 ? 'C' : 'D', foreign: dsym !== sym || undefined,
             biasBuy: !!(d.h4 && d.h4.biasBuy), session: sessOf(Math.floor(now / 1000)),
             stackOk: !!(d.checks && d.checks.stackOk), sarOk: !!(d.checks && d.checks.sarOk),
             inZone: !!(d.checks && d.checks.inZone100), bounce: !!(d.checks && d.checks.bounceConfirm)
           } }));
-          broadcast({ type: 'trade', sym, at: now,
+          broadcast({ type: 'trade', sym: snapshots[dsym] ? dsym : sym, at: now,
             txt: 'เปิดไม้ ' + dl.dir.toUpperCase() + ' ' + dl.lot + ' ' + (dl.symd || sym) + ' @ ' + dl.price + ' (grade ' + (conf >= 80 ? 'A' : conf >= 65 ? 'B' : conf >= 50 ? 'C' : 'D') + ')', pl: 0 });
         } else {
           let src = st.openTrades && st.openTrades[dl.pos];
@@ -252,7 +257,7 @@ function record(sym, prev, d) {
           }
           if (st.openTrades) delete st.openTrades[dl.pos];
           logAppend('trades.jsonl', Object.assign(base, { kind: 'close', pl: dl.pl, mfe, mae }));
-          broadcast({ type: 'trade', sym, at: now,
+          broadcast({ type: 'trade', sym: snapshots[dsym] ? dsym : sym, at: now,
             txt: 'ปิดไม้ ' + (dl.symd || sym) + ' ' + (dl.pl >= 0 ? '+' : '') + dl.pl + ' USD', pl: dl.pl });
         }
       }
@@ -399,7 +404,7 @@ function snapshotContext(sym) {
         ? h.n + ' past releases recorded by this system - avg move ' + (h.avg15 > 0 ? '+' : '') + h.avg15 + ' pts in 15min (avg magnitude ' + h.avgAbs15 + '), up ' + h.upPct + '% of the time' + (h.avg30 != null ? ', avg ' + (h.avg30 > 0 ? '+' : '') + h.avg30 + ' in 30min' : '')
         : 'none recorded yet (history builds from today)');
     })(),
-    'RECENT NEWS REACTIONS (measured from price): ' + (newsCache.events.filter(e => newsCcy(sym).has(e.ccy) && e.impact === 'High' && e.t <= Date.now() && e.t > Date.now() - 12 * 3600000).map(e => { const r = newsReaction(sym, e.t); return e.title + (e.actual ? ' actual ' + e.actual + ' vs fc ' + (e.forecast || '?') : '') + (r ? ' -> gold ' + (r.p15 > 0 ? '+' : '') + r.p15 + ' in 15min' + (r.p30 != null ? ', ' + (r.p30 > 0 ? '+' : '') + r.p30 + ' in 30min' : '') : ''); }).join(' | ') || 'none'),
+    'RECENT NEWS REACTIONS (measured from price): ' + (newsCache.events.filter(e => newsCcy(sym).has(e.ccy) && e.impact === 'High' && e.t <= Date.now() && e.t > Date.now() - 12 * 3600000).map(e => { const r = newsReaction(sym, e.t); return e.title + (e.actual ? ' actual ' + e.actual + ' vs fc ' + (e.forecast || '?') : '') + (r ? ' -> ' + sym + ' ' + (r.p15 > 0 ? '+' : '') + r.p15 + ' in 15min' + (r.p30 != null ? ', ' + (r.p30 > 0 ? '+' : '') + r.p30 + ' in 30min' : '') : ''); }).join(' | ') || 'none'),
     'RECORDED RESEARCH STATS (last 7 days, logged by this cockpit):\n' + statsText(sym, 7),
     'RECENT REAL TRADES (auto-captured from his MT5 account by this cockpit):\n' + (pairTrades(400).filter(r => !r.sym || r.sym === sym).slice(-8).map(r => {
       const sys = r.ctx ? (r.ctx.stackOk && r.ctx.sarOk && r.ctx.inZone && r.ctx.bounce) : null;
@@ -1326,7 +1331,10 @@ function parseNum(v) {
   else if (suf.includes('B')) n *= 1e9;
   return n;
 }
-function newsVerdict(e) {
+function isGold(sym) { return /XAU/i.test(sym || ''); }
+function symLabel(sym) { return isGold(sym) ? 'ทอง' : (sym || ''); }
+function newsVerdict(e, sym) {
+  if (sym !== undefined && !isGold(sym)) return null;
   const bias = goldBias(e.title);
   if (bias === 'special') return null;
   const act = parseNum(e.actual), ref = parseNum(e.forecast) != null ? parseNum(e.forecast) : parseNum(e.previous);
@@ -1336,7 +1344,8 @@ function newsVerdict(e) {
   const goldPos = (bias === 'inverse') ? !higher : higher;
   return goldPos ? 'บวกทอง' : 'ลบทอง';
 }
-function newsRule(e) {
+function newsRule(e, sym) {
+  if (sym !== undefined && !isGold(sym)) return 'ดัชนี: ตัดสินจากปฏิกิริยาที่ระบบวัดจริง (แนวโน้มทั่วไป: ข่าวที่ดันดอกเบี้ยขึ้น = ลบดัชนี · ข่าวเศรษฐกิจอ่อน = มักบวกเพราะหวังลดดอก)';
   const bias = goldBias(e.title);
   if (bias === 'special') return 'ดูโทนแถลง — hawkish = ลบทอง · dovish = บวกทอง';
   if (bias === 'direct') return 'ออกสูงกว่าคาด = บวกทอง · ต่ำกว่าคาด = ลบทอง';
@@ -1391,10 +1400,10 @@ setInterval(() => {
       logAppend('news.jsonl', {
         at: now, sym, t: e.t, title: e.title, ccy: e.ccy, impact: e.impact,
         forecast: e.forecast, previous: e.previous, actual: e.actual,
-        verdict: newsVerdict(e), p15: r.p15, p30: r.p30
+        verdict: newsVerdict(e, sym), p15: r.p15, p30: r.p30
       });
       broadcast({ type: 'ai', sym, at: now,
-        text: 'NEWS DESK บันทึกผลถาวร: ' + e.ccy + ' ' + e.title + ' -> ทอง ' + (r.p15 > 0 ? '+' : '') + r.p15 + ' จุดใน 15น / ' + (r.p30 > 0 ? '+' : '') + r.p30 + ' ใน 30น' });
+        text: 'NEWS DESK บันทึกผลถาวร: ' + e.ccy + ' ' + e.title + ' -> ' + symLabel(sym) + ' ' + (r.p15 > 0 ? '+' : '') + r.p15 + ' จุดใน 15น / ' + (r.p30 > 0 ? '+' : '') + r.p30 + ' ใน 30น' });
     }
   }
 }, 5 * 60000);
@@ -1408,8 +1417,8 @@ app.get('/api/news', (req, res) => {
     .map(e => {
       const past = e.t <= now;
       return Object.assign({}, e, {
-        rule: newsRule(e),
-        verdict: newsVerdict(e),
+        rule: newsRule(e, sym),
+        verdict: newsVerdict(e, sym),
         reaction: (past && e.impact === 'High') ? newsReaction(sym, e.t) : null,
         hist: (e.impact === 'High') ? newsHistFor(sym, e.title, e.ccy) : null
       });
