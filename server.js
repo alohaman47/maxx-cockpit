@@ -989,6 +989,15 @@ async function runPlaybook(sym, sessName) {
 
   gradePending(sym, sessName, open, close);
 
+  // book #13: session character record (same rules as Session Map v2 / Pine)
+  const sessRec = logSessionRecord(sym, sessName, bars, segs, idx, facts, d)
+    || readTail('sessions.jsonl', 300).find(e => e.id === sym + '-' + sessName + '-' + seg[seg.length - 1].t) || null;
+  const todayChars = {};
+  if (sessRec) for (const e of readTail('sessions.jsonl', 30)) if (e.sym === sym && e.tday === sessRec.tday) todayChars[e.session] = e.char;
+  const charTxt = sessRec ? ', CHARACTER: ' + sessRec.char + ' (range ' + sessRec.ratio + 'x normal, efficiency ' + sessRec.eff + ', day range so far ' + Math.round((sessRec.dayPct || 0) * 100) + '% of normal day'
+    + (Object.keys(sessRec.brk || {}).filter(k => sessRec.brk[k]).length ? ', broke ' + Object.keys(sessRec.brk).filter(k => sessRec.brk[k]).join('/') : '') + ')' : '';
+  const histTxt = sessRec ? sessionHistoryText(sym, todayChars) : '';
+
   let aiCall = null, aiText = null;
   if (KIMI_KEY) {
     try {
@@ -996,10 +1005,10 @@ async function runPlaybook(sym, sessName) {
         + ', net ' + facts.net + ', close at ' + Math.round(closePos * 100) + '% of session range'
         + (facts.brokePrevHi ? ', broke previous session high' : '') + (facts.brokePrevLo ? ', broke previous session low' : '')
         + (facts.brokePDH ? ', CLOSED ABOVE PDH (new high vs yesterday)' : '') + (facts.brokePDL ? ', CLOSED BELOW PDL' : '')
-        + (facts.rejPDH ? ', tested PDH and REJECTED' : '') + (facts.rejPDL ? ', tested PDL and HELD' : '');
+        + (facts.rejPDH ? ', tested PDH and REJECTED' : '') + (facts.rejPDL ? ', tested PDL and HELD' : '') + charTxt;
       const text = await askKimi([
         { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: 'session เพิ่งปิด วิเคราะห์และทายทิศ session ถัดไป (' + nextSession + ')' + String.fromCharCode(10,10) + 'FACTS: ' + factsTxt + String.fromCharCode(10,10) + 'CONTEXT:' + String.fromCharCode(10) + snapshotContext(sym) + String.fromCharCode(10,10) + 'รูปแบบคำตอบบังคับเคร่งครัด: ตัวอักษรแรกสุดของคำตอบต้องเริ่มด้วย CALL: ตามด้วย UP หรือ DOWN หรือ RANGE คำเดียว (ทายทิศ ' + nextSession + ') เช่น "CALL: UP" แล้วค่อยขึ้นบรรทัดใหม่เขียนบทวิเคราะห์ 3-4 ประโยค: เกิดอะไรขึ้น + แผนสำหรับ ' + nextSession + ' ตามเทคนิค ห้ามเกิน 5 ประโยค ถ้าไม่มีบรรทัด CALL ถือว่าคำตอบใช้ไม่ได้' }
+        { role: 'user', content: 'session เพิ่งปิด วิเคราะห์และทายทิศ session ถัดไป (' + nextSession + ')' + String.fromCharCode(10,10) + 'FACTS: ' + factsTxt + String.fromCharCode(10,10) + histTxt + 'CONTEXT:' + String.fromCharCode(10) + snapshotContext(sym) + String.fromCharCode(10,10) + 'รูปแบบคำตอบบังคับเคร่งครัด: ตัวอักษรแรกสุดของคำตอบต้องเริ่มด้วย CALL: ตามด้วย UP หรือ DOWN หรือ RANGE คำเดียว (ทายทิศ ' + nextSession + ') เช่น "CALL: UP" แล้วค่อยขึ้นบรรทัดใหม่เขียนบทวิเคราะห์ 3-4 ประโยค: เกิดอะไรขึ้น + แผนสำหรับ ' + nextSession + ' ตามเทคนิค ห้ามเกิน 5 ประโยค ถ้าไม่มีบรรทัด CALL ถือว่าคำตอบใช้ไม่ได้' }
       ], 1200);
       let mm = /CALL[:\s-]*\b(UP|DOWN|RANGE)\b/i.exec(text || '');
       if (!mm) mm = /^\s*\b(UP|DOWN|RANGE)\b/i.exec(text || '');
@@ -1016,8 +1025,113 @@ async function runPlaybook(sym, sessName) {
     kind: 'pred', id, at: Date.now(), sym, session: sessName, nextSession,
     facts, sysCall, aiCall, aiText, thr
   });
-  broadcast({ type: 'ai', sym, at: Date.now(), text: 'PLAYBOOK: ' + sessName + ' จบ — ทาย ' + nextSession + ' | ระบบ: ' + sysCall + (aiCall ? ' · AI: ' + aiCall : '') });
+  broadcast({ type: 'ai', sym, at: Date.now(), text: 'PLAYBOOK: ' + sessName + ' จบ' + (sessRec ? ' [' + (CHAR_TH[sessRec.char] || sessRec.char) + ' ' + sessRec.ratio + 'x]' : '') + ' — ทาย ' + nextSession + ' | ระบบ: ' + sysCall + (aiCall ? ' · AI: ' + aiCall : '') });
 }
+
+// ---------- SESSION CHARACTER (book #13: sessions.jsonl) ----------
+// Same rules as the cockpit Session Map v2 and the TradingView Pine: TREND / ACCUM / DISTRIB / SWEEP / RANGE.
+const SESS_NORM = { ASIA: 6.7, LONDON: 4.5, NY: 8.7, DAY: 12.7 }; // multiples of M15 ATR (XAUUSD Sep 2025-Aug 2026)
+function atrBaseline(bars) { // mean true range of the bars BEFORE the last 24h
+  const base = bars.length > 120 ? bars.slice(0, bars.length - 96) : bars;
+  let s = 0, n = 0;
+  for (let i = 1; i < base.length; i++) { s += Math.max(base[i].h - base[i].l, Math.abs(base[i].h - base[i - 1].c), Math.abs(base[i].l - base[i - 1].c)); n++; }
+  return n ? s / n : 0;
+}
+function segHiLo(bars, g) {
+  let hi = -1e18, lo = 1e18;
+  for (let j = g.a; j <= g.b; j++) { hi = Math.max(hi, bars[j].h); lo = Math.min(lo, bars[j].l); }
+  return { hi, lo };
+}
+function sessCharacter(f) { // f: {net, range, ratio, eff, hi, lo, close, prevHi, prevLo}
+  if (f.prevHi != null && f.hi > f.prevHi && f.close < f.prevHi && f.net <= 0) return 'SWEEP_HI';
+  if (f.prevLo != null && f.lo < f.prevLo && f.close > f.prevLo && f.net >= 0) return 'SWEEP_LO';
+  if (f.eff >= 0.55 && f.ratio >= 0.6) return f.net > 0 ? 'TREND_UP' : 'TREND_DN';
+  if (f.ratio > 0 && f.ratio < 0.7) return 'ACCUM';
+  if (f.ratio >= 0.9 && f.eff < 0.3) return 'DISTRIB';
+  return 'RANGE';
+}
+function logSessionRecord(sym, sessName, bars, segs, idx, facts, d) {
+  const g = segs[idx];
+  const id = sym + '-' + sessName + '-' + bars[g.b].t;
+  if (readTail('sessions.jsonl', 300).some(e => e.id === id)) return null;
+  const atr = atrBaseline(bars);
+  const ratio = atr ? facts.range / (atr * SESS_NORM[sessName]) : 0;
+  const eff = facts.range ? Math.abs(facts.net) / facts.range : 0;
+  let pidx = idx - 1; while (pidx >= 0 && segs[pidx].s === 'OFF') pidx--;
+  const prev = pidx >= 0 ? segHiLo(bars, segs[pidx]) : { hi: null, lo: null };
+  const ch = sessCharacter({ net: facts.net, range: facts.range, ratio, eff, hi: facts.hi, lo: facts.lo, close: facts.close, prevHi: prev.hi, prevLo: prev.lo });
+  // which earlier-session levels of the same trading day were broken during this session
+  const brk = {};
+  const tdKey = tradingDayKey(bars[g.b].t * 1000);
+  for (let k = idx - 1; k >= 0; k--) {
+    const sg = segs[k]; if (sg.s === 'OFF') continue;
+    if (tradingDayKey(bars[sg.b].t * 1000) !== tdKey) break;
+    const hl = segHiLo(bars, sg);
+    brk[sg.s[0] + 'H'] = facts.hi > hl.hi;
+    brk[sg.s[0] + 'L'] = facts.lo < hl.lo;
+  }
+  // day range so far vs norm
+  let dh = -1e18, dl = 1e18;
+  for (let j = 0; j <= g.b; j++) if (tradingDayKey(bars[j].t * 1000) === tdKey) { dh = Math.max(dh, bars[j].h); dl = Math.min(dl, bars[j].l); }
+  const dayRng = dh > dl ? dh - dl : 0;
+  const rec = {
+    id, at: Date.now(), sym, session: sessName, tday: tdKey, endTs: bars[g.b].t,
+    net: facts.net, range: facts.range, closePos: facts.closePos, ratio: +ratio.toFixed(2), eff: +eff.toFixed(2),
+    atr: +atr.toFixed(5), char: ch, brk,
+    dayRng: +dayRng.toFixed(5), dayPct: atr ? +(dayRng / (atr * SESS_NORM.DAY)).toFixed(2) : null,
+    brokePDH: facts.brokePDH, brokePDL: facts.brokePDL, rejPDH: facts.rejPDH, rejPDL: facts.rejPDL
+  };
+  logAppend('sessions.jsonl', rec);
+  return rec;
+}
+const CHAR_TH = { TREND_UP: 'TREND ขึ้น', TREND_DN: 'TREND ลง', ACCUM: 'ACCUMULATION สะสม', DISTRIB: 'DISTRIBUTION โยนของ', SWEEP_HI: 'SWEEP กวาด high แล้วกลับ', SWEEP_LO: 'SWEEP กวาด low แล้วกลับ', RANGE: 'RANGE ปกติ' };
+// transition table: what NY did after each Asia / London character (paired by trading day)
+function sessionTransitions(sym, days) {
+  const cutoff = Date.now() - days * 86400000;
+  const rows = readTail('sessions.jsonl', 3000).filter(e => e.sym === sym && e.at >= cutoff);
+  const byDay = {};
+  rows.forEach(r => { (byDay[r.tday] = byDay[r.tday] || {})[r.session] = r; });
+  const out = { n: rows.length, days: Object.keys(byDay).length, freq: {}, from: {} };
+  rows.forEach(r => { const f = out.freq[r.session] = out.freq[r.session] || {}; f[r.char] = (f[r.char] || 0) + 1; });
+  for (const dk of Object.keys(byDay)) {
+    const dd = byDay[dk]; if (!dd.NY) continue;
+    for (const src of ['ASIA', 'LONDON']) {
+      if (!dd[src]) continue;
+      const key = src + ':' + dd[src].char;
+      const t = out.from[key] = out.from[key] || { src, char: dd[src].char, n: 0, netSum: 0, rangeSum: 0, up: 0, dn: 0, sweepHi: 0, sweepLo: 0, trendUp: 0, trendDn: 0, brkH: 0, brkL: 0 };
+      t.n++; t.netSum += dd.NY.net; t.rangeSum += dd.NY.range;
+      if (dd.NY.net > 0) t.up++; else if (dd.NY.net < 0) t.dn++;
+      if (dd.NY.char === 'SWEEP_HI') t.sweepHi++; if (dd.NY.char === 'SWEEP_LO') t.sweepLo++;
+      if (dd.NY.char === 'TREND_UP') t.trendUp++; if (dd.NY.char === 'TREND_DN') t.trendDn++;
+      const b = dd.NY.brk || {};
+      if (b[src[0] + 'H']) t.brkH++; if (b[src[0] + 'L']) t.brkL++;
+    }
+  }
+  const list = Object.values(out.from).map(t => ({
+    src: t.src, char: t.char, n: t.n,
+    avgNet: +(t.netSum / t.n).toFixed(2), avgRange: +(t.rangeSum / t.n).toFixed(2),
+    upPct: Math.round(100 * t.up / t.n), dnPct: Math.round(100 * t.dn / t.n),
+    sweepHiPct: Math.round(100 * t.sweepHi / t.n), sweepLoPct: Math.round(100 * t.sweepLo / t.n),
+    trendUpPct: Math.round(100 * t.trendUp / t.n), trendDnPct: Math.round(100 * t.trendDn / t.n),
+    brkHPct: Math.round(100 * t.brkH / t.n), brkLPct: Math.round(100 * t.brkL / t.n)
+  })).sort((a, b) => a.src === b.src ? b.n - a.n : (a.src === 'LONDON' ? -1 : 1));
+  return { n: out.n, days: out.days, freq: out.freq, transitions: list, lowSample: out.days < 20 };
+}
+function sessionHistoryText(sym, todayChars) { // compact stats for the Kimi NY-brief prompt
+  const tr = sessionTransitions(sym, 90);
+  if (!tr.transitions.length) return '';
+  const rel = tr.transitions.filter(t => todayChars[t.src] === t.char);
+  const fmtT = t => t.src + ' ' + t.char + ' -> NY (n=' + t.n + '): net avg ' + (t.avgNet >= 0 ? '+' : '') + t.avgNet + ', up ' + t.upPct + '% / down ' + t.dnPct + '%, NY swept ' + t.src.toLowerCase() + ' high first ' + t.brkHPct + '%, low first ' + t.brkLPct + '%, NY became TREND ' + (t.trendUpPct + t.trendDnPct) + '%';
+  return 'SESSION CHARACTER HISTORY (own book, last 90 days, ' + tr.days + ' trading days' + (tr.lowSample ? ' - LOW SAMPLE, treat as hints only' : '') + '):\n'
+    + (rel.length ? rel.map(fmtT).join('\n') : 'no history yet for today\'s Asia/London characters') + '\n';
+}
+app.get('/api/sessions', (req, res) => {
+  const sym = req.query.sym || Object.keys(snapshots)[0] || 'XAUUSD';
+  const days = Math.max(1, Math.min(365, parseInt(req.query.days, 10) || 90));
+  const cutoff = Date.now() - days * 86400000;
+  const rows = readTail('sessions.jsonl', 3000).filter(e => e.sym === sym && e.at >= cutoff).slice(-60).reverse();
+  res.json({ ok: true, rows, stats: sessionTransitions(sym, days), charTh: CHAR_TH });
+});
 
 const pbDone = {};
 setInterval(() => {
@@ -1215,7 +1329,7 @@ app.get('/api/system', (req, res) => {
   for (const sym of Object.keys(snapshots))
     feeds[sym] = { ageSec: Math.round((Date.now() - snapshots[sym].at) / 1000) };
   const files = {};
-  for (const f of ['events.jsonl', 'sar.jsonl', 'bias.jsonl', 'structure.jsonl', 'trades.jsonl', 'health.jsonl', 'journal.jsonl', 'aio.jsonl', 'hypo.jsonl']) {
+  for (const f of ['events.jsonl', 'sar.jsonl', 'bias.jsonl', 'structure.jsonl', 'trades.jsonl', 'health.jsonl', 'journal.jsonl', 'aio.jsonl', 'hypo.jsonl', 'sessions.jsonl']) {
     try { files[f] = +(fs.statSync(path.join(DATA_DIR, f)).size / 1024).toFixed(1); }
     catch (e) { files[f] = 0; }
   }
