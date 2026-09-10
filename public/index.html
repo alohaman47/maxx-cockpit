@@ -357,6 +357,7 @@
       <div class="sesscards" id="sesscards"></div>
       <svg id="sesschart" viewBox="0 0 1000 240" style="width:100%;height:auto;display:block"></svg>
       <div id="sesshint" class="plan" style="display:none"></div>
+      <div id="sessbrief" class="plan" style="display:none"></div>
     </div>
     <div class="panel">
       <div class="ptitle" style="display:flex;align-items:center;gap:10px">แท่งเทียน + เส้น + โซน
@@ -414,7 +415,7 @@
       <button class="jsave" onclick="jSave()">จดบันทึก</button>
       <div class="jnav"><button onclick="jDay(-1)">◀</button><span id="jday"></span><button onclick="jDay(1)">▶</button></div>
       <div class="jlist" id="jlist"></div>
-      <div class="footer">MAXX COCKPIT v2.9.1 · live · กดออเดอร์จริงใน MT5</div>
+      <div class="footer">MAXX COCKPIT v3.0 · live · กดออเดอร์จริงใน MT5</div>
     </div>
   </div>
 </div>
@@ -1027,15 +1028,35 @@ function render(){
 }
 
 function renderSessions(d, dg){
-  var hint = el('sesshint'), svg = el('sesschart'), cards = el('sesscards');
+  var hint = el('sesshint'), svg = el('sesschart'), cards = el('sesscards'), brief = el('sessbrief');
   if (!d.bars || d.bars.length < 4){
-    svg.style.display = 'none'; cards.innerHTML = '';
+    svg.style.display = 'none'; cards.innerHTML = ''; if (brief) brief.style.display = 'none';
     hint.style.display = ''; hint.textContent = 'Session Map ต้องใช้ EA v0.3 — อัพเดตไฟล์ EA บน VPS แล้ว recompile';
     return;
   }
   hint.style.display = 'none'; svg.style.display = 'block';
   var hourFmt = S._hf || (S._hf = new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'numeric',hour12:false}));
-  var bars = d.bars.slice(-96).map(function(b){ return b.length >= 5 ? [b[0], b[2], b[3], b[4]] : b; });
+  var hmFmt = S._hmf || (S._hmf = new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',hour12:false}));
+  var dayFmt = S._jdf || (S._jdf = new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}));
+  var has5 = d.bars[0].length >= 5;
+  // ---- v3.0 volatility baseline: mean true range of the bars BEFORE the last 24h (so today's action does not inflate its own norm)
+  var allB = d.bars.map(function(b){ return b.length >= 5 ? [b[0], b[2], b[3], b[4]] : b; });
+  var baseB = allB.length > 120 ? allB.slice(0, allB.length - 96) : allB;
+  var trs = 0, trn = 0;
+  for (var q = 1; q < baseB.length; q++){
+    var tr = Math.max(baseB[q][1]-baseB[q][2], Math.abs(baseB[q][1]-baseB[q-1][3]), Math.abs(baseB[q][2]-baseB[q-1][3]));
+    trs += tr; trn++;
+  }
+  var atr = trn ? trs/trn : 0;
+  // session range norms as multiples of M15 ATR (XAUUSD M15, Sep 2025-Aug 2026 medians; used as rough scale for NAS100 too)
+  var NORM = {ASIA:6.7, LONDON:4.5, NY:8.7, DAY:12.7};
+  // typical cumulative share of the trading-day range reached by each 15-min slot (ET), same data set
+  var CUM = S._cum || (S._cum = (function(){
+    var k = ['18:00',0.145,'18:30',0.191,'19:00',0.234,'19:30',0.269,'20:00',0.328,'20:30',0.371,'21:00',0.417,'21:30',0.453,'22:00',0.48,'22:30',0.493,'23:00',0.512,'23:30',0.523,'00:00',0.532,'00:30',0.551,'01:00',0.568,'01:30',0.586,'02:00',0.605,'02:30',0.619,'03:00',0.63,'03:30',0.642,'04:00',0.66,'04:30',0.675,'05:00',0.688,'05:30',0.695,'06:00',0.704,'06:30',0.711,'07:00',0.716,'07:30',0.725,'08:00',0.735,'08:30',0.76,'09:00',0.785,'09:30',0.818,'10:00',0.852,'10:30',0.883,'11:00',0.905,'11:30',0.924,'12:00',0.935,'12:30',0.944,'13:00',0.95,'13:30',0.958,'14:00',0.966,'14:30',0.97,'15:00',0.98,'15:30',0.988,'16:00',0.994,'16:30',0.999,'17:00',1.0];
+    var o = {}; for (var i = 0; i < k.length; i += 2) o[k[i]] = k[i+1]; return o; })());
+  var KICK = [['20:00','โตเกียว'],['21:00','เซี่ยงไฮ้'],['01:30','แฟรงก์เฟิร์ต'],['03:00','ลอนดอน'],['08:00','NY เริ่ม'],['08:30','ข่าว'],['09:30','พีค'],['11:30','หมดแรง']];
+
+  var bars = allB.slice(-96);
   function sessOf(ts){
     var h = parseInt(hourFmt.format(new Date(ts*1000)),10) % 24;
     if (h >= 19 || h < 3) return 'ASIA';
@@ -1055,21 +1076,45 @@ function renderSessions(d, dg){
   var SNAME = {ASIA:'ASIA', LONDON:'LONDON', NY:'NEW YORK'};
   var lastIdx = bars.length - 1;
 
-  cards.innerHTML = ['ASIA','LONDON','NY'].map(function(nm){
-    var g = latest[nm];
-    if (!g) return '<div class="scard"><div class="sn">'+SNAME[nm]+'</div><div class="rng">ยังไม่มีข้อมูลในช่วง 24 ชม.</div></div>';
+  // ---- session facts + character ----
+  function facts(g){
     var open = g.a > 0 ? bars[g.a-1][3] : bars[g.a][3];
     var hi = -1e18, lo = 1e18;
     for (var j = g.a; j <= g.b; j++){ hi = Math.max(hi, bars[j][1]); lo = Math.min(lo, bars[j][2]); }
-    var lastC = bars[g.b][3], net = lastC - open;
-    var live = (g.b === lastIdx && sessOf(bars[lastIdx][0]) === nm);
+    var close = bars[g.b][3], rng = hi - lo, net = close - open;
+    return {open:open, hi:hi, lo:lo, close:close, rng:rng, net:net, eff: rng ? Math.abs(net)/rng : 0, pos: rng ? (close-lo)/rng : 0.5,
+      ratio: atr ? rng/(atr*NORM[g.s]) : 0, live: (g.b === lastIdx && sessOf(bars[lastIdx][0]) === g.s)};
+  }
+  var F = {}; ['ASIA','LONDON','NY'].forEach(function(nm){ if (latest[nm]) F[nm] = facts(latest[nm]); });
+  var prevOf = {ASIA:'NY', LONDON:'ASIA', NY:'LONDON'};
+  function character(nm){
+    var f = F[nm]; if (!f) return null;
+    var p = F[prevOf[nm]]; // previous session (may be from earlier in the window)
+    var pg = latest[prevOf[nm]];
+    var prevBefore = pg && pg.b < latest[nm].a;
+    if (prevBefore && p && f.hi > p.hi && f.close < p.hi && f.net <= 0) return {k:'SWEEP', t:'SWEEP ▲ กวาด high แล้วกลับ', c:'#ff9333'};
+    if (prevBefore && p && f.lo < p.lo && f.close > p.lo && f.net >= 0) return {k:'SWEEP', t:'SWEEP ▼ กวาด low แล้วกลับ', c:'#ff9333'};
+    if (f.eff >= 0.55 && f.ratio >= 0.6) return f.net > 0 ? {k:'TREND', t:'TREND ▲', c:'var(--buy)'} : {k:'TREND', t:'TREND ▼', c:'var(--sell)'};
+    if (f.ratio > 0 && f.ratio < 0.7) return {k:'ACCUM', t:'ACCUMULATION สะสม', c:'#e9d08a'};
+    if (f.ratio >= 0.9 && f.eff < 0.3) return {k:'DISTRIB', t:'DISTRIBUTION โยนของ', c:'#a06bff'};
+    return {k:'RANGE', t:'RANGE ปกติ', c:'var(--dim)'};
+  }
+  var CH = {}; ['ASIA','LONDON','NY'].forEach(function(nm){ CH[nm] = character(nm); });
+
+  cards.innerHTML = ['ASIA','LONDON','NY'].map(function(nm){
+    var g = latest[nm], f = F[nm], ch = CH[nm];
+    if (!g) return '<div class="scard"><div class="sn">'+SNAME[nm]+'</div><div class="rng">ยังไม่มีข้อมูลในช่วง 24 ชม.</div></div>';
+    var chip = ch ? '<span style="font-family:var(--mono);font-size:10.5px;font-weight:800;color:'+ch.c+'">'+(f.live?'กำลัง ':'')+ch.t+'</span>'
+      + (f.ratio ? '<span style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-left:6px">range '+f.ratio.toFixed(1)+'× ปกติ · ปิดที่ '+Math.round(f.pos*100)+'%</span>' : '') : '';
     return '<div class="scard" style="border-color:'+SCOL[nm]+'.45)">'
-      + '<div class="sn">'+SNAME[nm]+(live?'<span class="live">● LIVE</span>':'<span>จบแล้ว</span>')+'</div>'
-      + '<div class="net" style="color:'+(net>=0?'var(--buy)':'var(--sell)')+'">'+(net>=0?'+':'')+fmt(net,dg)+'</div>'
-      + '<div class="rng">ขึ้นสูงสุด +'+fmt(Math.max(0,hi-open),dg)+' · ย่อลึกสุด -'+fmt(Math.max(0,open-lo),dg)+'</div></div>';
+      + '<div class="sn">'+SNAME[nm]+(f.live?'<span class="live">● LIVE</span>':'<span>จบแล้ว</span>')+'</div>'
+      + '<div class="net" style="color:'+(f.net>=0?'var(--buy)':'var(--sell)')+'">'+(f.net>=0?'+':'')+fmt(f.net,dg)+'</div>'
+      + '<div class="rng">ขึ้นสูงสุด +'+fmt(Math.max(0,f.hi-f.open),dg)+' · ย่อลึกสุด -'+fmt(Math.max(0,f.open-f.lo),dg)+' · กว้าง '+fmt(f.rng,dg)+'</div>'
+      + '<div style="margin-top:5px">'+chip+'</div></div>';
   }).join('');
 
-  var W=1000, H=240, padL=8, padR=76, padT=14, padB=8;
+  // ---- chart ----
+  var W=1000, H=240, padL=8, padR=76, padT=14, padB=14;
   var hi2=-1e18, lo2=1e18;
   bars.forEach(function(b){ hi2=Math.max(hi2,b[1]); lo2=Math.min(lo2,b[2]); });
   var span = (hi2-lo2) || 1; hi2 += span*0.05; lo2 -= span*0.05; span = hi2-lo2;
@@ -1079,7 +1124,30 @@ function renderSessions(d, dg){
   segs.forEach(function(g){
     if (g.s === 'OFF') return;
     out += '<rect x="'+X(g.a).toFixed(1)+'" y="0" width="'+(X(g.b)-X(g.a)).toFixed(1)+'" height="'+H+'" fill="'+SCOL[g.s]+'.09)"/>';
-    out += '<text x="'+(X(g.a)+4).toFixed(1)+'" y="12" font-size="10" fill="'+SCOL[g.s]+'.95)" font-family="monospace" font-weight="bold">'+g.s+'</text>';
+    out += '<text x="'+(X(g.a)+4).toFixed(1)+'" y="12" font-size="10" fill="'+SCOL[g.s]+'.95)" font-family="monospace" font-weight="bold">'+g.s+(CH[g.s] && latest[g.s] === g ? ' · '+CH[g.s].t.split(' ').slice(0,2).join(' ') : '')+'</text>';
+  });
+  // kick-off vertical markers (times gold typically starts moving, ET)
+  var kickMap = {}; KICK.forEach(function(k){ kickMap[k[0]] = k[1]; });
+  bars.forEach(function(b, i){
+    var hm = hmFmt.format(new Date(b[0]*1000)); if (hm === '24:00') hm = '00:00';
+    if (kickMap[hm]){
+      var x = X(i).toFixed(1), peak = hm === '09:30';
+      out += '<line x1="'+x+'" y1="16" x2="'+x+'" y2="'+(H-padB)+'" stroke="'+(peak?'#d9b24a':'#8f96a5')+'" stroke-width="'+(peak?1.2:0.8)+'" stroke-dasharray="2,4" opacity="'+(peak?0.8:0.45)+'"/>';
+      out += '<text x="'+(X(i)+2).toFixed(1)+'" y="'+(H-3)+'" font-size="8" fill="'+(peak?'#d9b24a':'#8f96a5')+'" font-family="monospace">'+hm+' '+kickMap[hm]+'</text>';
+    }
+  });
+  // Asia / London hi-lo carried forward into the later sessions
+  ['ASIA','LONDON'].forEach(function(nm){
+    var g = latest[nm], f = F[nm]; if (!g || !f || f.live || g.b >= lastIdx) return;
+    [['H', f.hi], ['L', f.lo]].forEach(function(lv){
+      if (lv[1] <= lo2 || lv[1] >= hi2) return;
+      var broken = -1;
+      for (var j = g.b + 1; j <= lastIdx; j++){ if (lv[0] === 'H' ? bars[j][1] > lv[1] : bars[j][2] < lv[1]){ broken = j; break; } }
+      var y = Y(lv[1]).toFixed(1), col = SCOL[nm]+'.8)';
+      out += '<line x1="'+X(g.b).toFixed(1)+'" y1="'+y+'" x2="'+(W-padR)+'" y2="'+y+'" stroke="'+col+'" stroke-width="1" '+(broken >= 0 ? '' : 'stroke-dasharray="6,3"')+'/>';
+      out += '<text x="'+(W-padR+4)+'" y="'+(Y(lv[1])+3).toFixed(1)+'" font-size="8" fill="'+col+'" font-family="monospace">'+nm[0]+'-'+lv[0]+(broken >= 0 ? ' ✕' : '')+'</text>';
+      if (broken >= 0) out += '<circle cx="'+X(broken).toFixed(1)+'" cy="'+y+'" r="2.6" fill="'+col+'"/>';
+    });
   });
   if (d.h4 && d.h4.wma50 > lo2 && d.h4.wma50 < hi2){
     out += '<line x1="'+padL+'" y1="'+Y(d.h4.wma50).toFixed(1)+'" x2="'+(W-padR)+'" y2="'+Y(d.h4.wma50).toFixed(1)+'" stroke="#2f6bff" stroke-dasharray="5,4" stroke-width="1"/>';
@@ -1097,6 +1165,45 @@ function renderSessions(d, dg){
   out += '<circle cx="'+lx.toFixed(1)+'" cy="'+ly.toFixed(1)+'" r="3.2" fill="#d9b24a"/>';
   out += '<text x="'+(lx+6).toFixed(1)+'" y="'+(ly+3).toFixed(1)+'" font-size="11" fill="#d9b24a" font-family="monospace" font-weight="bold">'+fmt(bars[lastIdx][3],dg)+'</text>';
   svg.innerHTML = out;
+
+  // ---- range budget + NY brief ----
+  if (!brief) return;
+  var nowTs = bars[lastIdx][0];
+  var tdKey = dayFmt.format(new Date((nowTs + 7*3600)*1000));
+  var dh = -1e18, dl = 1e18;
+  for (var k2 = 0; k2 < bars.length; k2++){
+    if (dayFmt.format(new Date((bars[k2][0] + 7*3600)*1000)) === tdKey){ dh = Math.max(dh, bars[k2][1]); dl = Math.min(dl, bars[k2][2]); }
+  }
+  var dayRng = dh > dl ? dh - dl : 0, dayNorm = atr * NORM.DAY;
+  var hmNow = hmFmt.format(new Date(nowTs*1000)); if (hmNow === '24:00') hmNow = '00:00';
+  var slot = hmNow.slice(0,3) + (parseInt(hmNow.slice(3),10) < 30 ? '00' : '30');
+  var cum = CUM[slot] || 1;
+  var budget = dayNorm ? 'RANGE BUDGET: วันนี้ใช้ไป '+fmt(dayRng,dg)+' = '+Math.round(dayRng/dayNorm*100)+'% ของวันปกติ ('+fmt(dayNorm,0)+') · ณ '+hmNow+' ET ปกติจะใช้ไป '+Math.round(cum*100)+'%'
+    + (cum < 1 ? ' · ที่เหลือของวันปกติทำได้อีก ~'+fmt(Math.max(0,(1-cum)*dayNorm),0) : '') : '';
+  var pace = dayNorm && cum ? dayRng/(dayNorm*cum) : 0;
+  var paceTxt = !pace ? '' : pace >= 1.4 ? ' → วันนี้ร้อนกว่าปกติ ระวังหมดพลังก่อน NY' : pace <= 0.6 ? ' → วันนี้เงียบ ถ้าจะระเบิดคือ NY' : ' → จังหวะปกติ';
+  // next kick-off
+  var mNow = parseInt(hmNow.slice(0,2),10)*60 + parseInt(hmNow.slice(3),10), nextK = null;
+  KICK.forEach(function(k){ var m = parseInt(k[0].slice(0,2),10)*60 + parseInt(k[0].slice(3),10); var dmin = (m - mNow + 1440) % 1440; if (dmin > 0 && (!nextK || dmin < nextK.d)) nextK = {d:dmin, k:k}; });
+  var nextTxt = nextK ? ' · ถัดไป '+nextK.k[0]+' '+nextK.k[1]+' อีก '+(nextK.d >= 60 ? Math.floor(nextK.d/60)+' ชม '+(nextK.d%60)+' น' : nextK.d+' น') : '';
+  // mechanical NY brief from Asia + London character
+  var parts = [];
+  ['ASIA','LONDON'].forEach(function(nm){ if (CH[nm] && F[nm] && !F[nm].live) parts.push(nm+' '+CH[nm].t.split(' ')[0]+(CH[nm].k==='TREND'||CH[nm].k==='SWEEP'?CH[nm].t.split(' ')[1]:'')+' ('+F[nm].ratio.toFixed(1)+'×)'); });
+  var lead = '';
+  var a = CH.ASIA && CH.ASIA.k, l = CH.LONDON && CH.LONDON.k, lf = F.LONDON, af = F.ASIA;
+  if (l === 'TREND' && lf && !lf.live) lead = lf.net > 0 ? 'London ลากขึ้นแล้ว → NY มอง continuation ขึ้น รอ retest หรือระวัง reversal ที่ 09:30 ถ้า pace ร้อน' : 'London ลากลงแล้ว → NY มอง continuation ลง รอ retest หรือระวัง reversal ที่ 09:30 ถ้า pace ร้อน';
+  else if (l === 'SWEEP') lead = 'London กวาด liquidity แล้วกลับ → NY มักไปฝั่งตรงข้ามกับที่กวาด';
+  else if (l === 'ACCUM' || a === 'ACCUM') lead = 'ช่วงก่อน NY สะสมแน่น → รอ breakout กล่อง Asia/London ที่ 08:30-09:30 อย่าเดาข้างก่อนทะลุ';
+  else if (l === 'DISTRIB') lead = 'London โยนของกว้างแต่ไม่ไปไหน → NY มีโอกาสกลับตัว รอเห็นฝั่งชัดก่อน';
+  else if (l && lf && !lf.live) lead = 'London ไม่มีทิศชัด → ใช้กล่อง Asia/London เป็นกรอบ ทะลุฝั่งไหนค่อยตาม';
+  var pdTxt = [];
+  if (d.pd && d.pd.h) pdTxt.push('PDH ห่าง '+fmt(d.pd.h - bars[lastIdx][3], 0));
+  if (d.pd && d.pd.l) pdTxt.push('PDL ห่าง '+fmt(bars[lastIdx][3] - d.pd.l, 0));
+  brief.style.display = '';
+  brief.style.textAlign = 'left';
+  brief.innerHTML = '<div style="color:var(--gold,#d9b24a);font-weight:700">'+budget+paceTxt+nextTxt+'</div>'
+    + (parts.length || lead ? '<div style="margin-top:6px"><span style="color:var(--dim);letter-spacing:.08em;font-weight:800">NY BRIEF</span> · '+parts.join(' · ')+(pdTxt.length?' · '+pdTxt.join(' / '):'')+(lead?'<br><span style="color:var(--text,#e8e8ec)">'+lead+'</span>':'')+'</div>' : '')
+    + '<div style="margin-top:4px;font-size:10px;color:var(--dim)">ค่าปกติ = ATR M15 × ตัวคูณจากสถิติ XAUUSD ก.ย.68-ส.ค.69 (Asia 6.7 / London 4.5 / NY 8.7 / วัน 12.7) · NAS100 ใช้ตัวคูณเดียวกันโดยประมาณ · display-only</div>';
 }
 
 // ---- AI analyst (Kimi) ----
